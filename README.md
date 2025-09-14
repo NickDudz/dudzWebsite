@@ -51,6 +51,7 @@ npm run dev
 - `npm run build` - Build for production
 - `npm run start` - Start production server
 - `npm run lint` - Run ESLint
+- `npm run test:galaxy` - Run lightweight Clustering Galaxy math tests
 
 ## Deployment
 
@@ -73,6 +74,37 @@ Or deploy manually:
 ├── CLAUDE.md          # Development guidance
 └── README.md          # Project documentation
 ```
+
+## Clustering Galaxy
+
+An optional, feather-light ML-themed idle/clicker background that renders a drifting data field with clusters and rare clickable outliers. It uses a single `<canvas>`, one requestAnimationFrame loop, and persists progress locally.
+
+- Components: `components/ClusteringGalaxyCanvas.tsx`, `components/GalaxyUI.tsx`
+- Hook: `hooks/useClusteringGalaxy.ts`
+- Styles: `styles/galaxy.css`
+- Notes: `example/Page.patch.txt`, `BALANCING.md`, `PERF.md`
+
+Integration is non-invasive — see `example/Page.patch.txt`.
+
+### A11Y Checklist
+
+- Honors `prefers-reduced-motion`: pauses animation/spawns; clicks still work.
+- Background pointer-events remain off; only the canvas captures clicks.
+- HUD is keyboard-focusable with clear labels; small, readable text on dark background.
+- No audio; subdued visuals; short animations (≤300ms bursts).
+
+### Effects Hook
+
+Subscribe for site-wide micro-effects:
+
+```
+window.addEventListener('galaxy-effect', (e) => {
+  const { name } = (e as CustomEvent).detail || {}
+  if (name === 'confetti') { /* quick confetti burst */ }
+  if (name === 'palette')  { /* rotate bg hue by ~15° for ~6s */ }
+})
+```
+
 
 ## License
 

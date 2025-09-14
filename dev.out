@@ -1,0 +1,42 @@
+
+> dudzwebsite@1.0.0 dev
+> next dev
+
+   ▲ Next.js 15.5.3
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.50.112:3000
+
+ ✓ Starting...
+ ✓ Ready in 2s
+ ○ Compiling / ...
+ ✓ Compiled / in 3.1s (542 modules)
+ GET / 200 in 3438ms
+ ✓ Compiled in 102ms (230 modules)
+ GET / 200 in 54ms
+ ✓ Compiled in 366ms (543 modules)
+ GET / 200 in 112ms
+ GET / 200 in 110ms
+ ✓ Compiled in 221ms (543 modules)
+ GET / 200 in 96ms
+ ✓ Compiled in 135ms (543 modules)
+ GET / 200 in 63ms
+ GET / 200 in 102ms
+ GET / 200 in 34ms
+ GET / 200 in 41ms
+ GET / 200 in 42ms
+ GET / 200 in 36ms
+ GET /?_ts=1757815757 200 in 36ms
+ ○ Compiling /_error ...
+ GET / 500 in 3369ms
+ GET / 500 in 15ms
+ GET / 500 in 14ms
+ GET / 500 in 15ms
+ GET /?_ts=1757816089 500 in 20ms
+ ✓ Compiled /_error in 2s (1663 modules)
+ GET / 200 in 99ms
+ GET / 200 in 367ms
+ GET /?_ts=1757816272 200 in 69ms
+ ✓ Compiled in 310ms (1663 modules)
+ GET / 200 in 96ms
+ ✓ Compiled in 252ms (1663 modules)
+ GET / 200 in 49ms

@@ -1,0 +1,43 @@
+Integration Notes — Clustering Galaxy (minimal patch)
+
+- Add state near your existing Stars toggle:
+  const [galaxyOn, setGalaxyOn] = useState(true)
+
+- Instantiate the hook once:
+  const galaxy = useClusteringGalaxy({ enabled: galaxyOn })
+
+- Background layer: mount the canvas above the swirl but below content.
+  In your fixed background container (inside the existing {starsOn && <div className="fixed inset-0"/>}):
+
+  <ClusteringGalaxyCanvas
+    enabled={galaxyOn}
+    parallaxY={smoothY}
+    api={galaxy.api}
+  />
+
+  Place it before the star swirl markup to visually sit above it.
+
+- Header/tool row: add the tiny HUD chip next to the Stars toggle:
+  <GalaxyUI
+    state={galaxy.state}
+    api={galaxy.api}
+    onToggle={() => setGalaxyOn(v => !v)}
+    enabled={galaxyOn}
+  />
+
+- Optional: listen for site-wide cosmetic hooks (confetti/palette):
+  useEffect(() => {
+    const onFx = (e: any) => {
+      const { name } = e.detail || {}
+      if (name === 'confetti') { /* burst + cooldown */ }
+      if (name === 'palette')  { /* rotate bg hue ~15° for ~6s */ }
+    }
+    window.addEventListener('galaxy-effect', onFx as any)
+    return () => window.removeEventListener('galaxy-effect', onFx as any)
+  }, [])
+
+Context anchors in app/page.tsx:
+- Use the existing smoothY from your scroll lerp for parallaxY.
+- Background container: the same absolute fixed inset-0 wrapper where stars render.
+- HUD placement: top-right in the header/tool row, no layout shift.
+
