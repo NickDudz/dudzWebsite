@@ -1,14 +1,29 @@
 # Nick Dudz Portfolio
 
-A modern portfolio website built with Next.js 15, featuring an animated starfield background and project showcase.
+A modern portfolio website built with Next.js 15, featuring an animated starfield background, project showcase, and an innovative ML-themed clicker game.
 
 ## Features
 
 - **Animated Starfield Background**: Multi-layer parallax scrolling stars with smooth animations
 - **Project Showcase**: Grid layout highlighting various projects and experiments
+- **ML-Themed Clicker Game**: Interactive background game with clustering mechanics
 - **Modern Design**: Dark theme with zinc color palette and glassmorphism effects
 - **Responsive Layout**: Mobile-first design that works across all devices
 - **Performance Optimized**: Uses Framer Motion and GPU-accelerated animations
+
+## 🚧 Current Status
+
+**Branch**: `feature/clicker-game-rework`  
+**Status**: Ready for architectural refactor and UX improvements
+
+The clicker game is currently implemented but needs:
+- TypeScript strict mode enabled
+- Memory leak fixes
+- Architecture refactoring
+- UX improvements and tutorial
+- Performance optimizations
+
+See [REWORK_PLAN.md](./REWORK_PLAN.md) for detailed refactor plan.
 
 ## Tech Stack
 
