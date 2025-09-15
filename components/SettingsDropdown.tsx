@@ -14,6 +14,8 @@ export type SettingsDropdownProps = {
   onTargetFpsChange?: (fps: number) => void
   performanceMode?: boolean
   onPerformanceModeToggle?: () => void
+  showFpsCounter?: boolean
+  onFpsCounterToggle?: () => void
 }
 
 export default function SettingsDropdown({
@@ -27,6 +29,8 @@ export default function SettingsDropdown({
   onTargetFpsChange,
   performanceMode = false,
   onPerformanceModeToggle,
+  showFpsCounter = false,
+  onFpsCounterToggle,
 }: SettingsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -159,6 +163,20 @@ export default function SettingsDropdown({
                       }`}
                     >
                       {performanceMode ? 'Low' : 'High'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-300">FPS Counter</span>
+                    <button
+                      onClick={onFpsCounterToggle}
+                      className={`px-2 py-1 text-[10px] rounded transition-all ${
+                        showFpsCounter
+                          ? 'bg-green-500/20 border border-green-500/50 text-green-200'
+                          : 'bg-zinc-700/30 border border-zinc-600/50 text-zinc-400'
+                      }`}
+                    >
+                      {showFpsCounter ? 'On' : 'Off'}
                     </button>
                   </div>
                 </div>

@@ -7,6 +7,7 @@ import GalaxyUI from '../components/GalaxyUI'
 import ErrorBoundary from '../components/ErrorBoundary'
 import StarfieldCanvas from '../components/StarfieldCanvas'
 import SettingsDropdown from '../components/SettingsDropdown'
+import FpsCounter from '../components/FpsCounter'
 import { useClusteringGalaxy } from '../hooks/useClusteringGalaxy'
 
 
@@ -21,6 +22,7 @@ export default function Page() {
   const [scrollY, setScrollY] = useState(0)
   const [smoothY, setSmoothY] = useState(0)
   const [showInstr, setShowInstr] = useState(false)
+  const [showFpsCounter, setShowFpsCounter] = useState(false)
   const lagFactor = 0.05 // Smoother interpolation for parallax
 
   useEffect(() => {
@@ -111,6 +113,13 @@ export default function Page() {
         </div>
       )}
 
+      {/* FPS Counter (top left) */}
+      <FpsCounter
+        show={showFpsCounter}
+        getCurrentFps={galaxy.api?.getCurrentFps}
+        getTargetFps={galaxy.api?.getTargetFps}
+      />
+
       <div className="relative z-[20] mx-auto max-w-6xl px-4 pb-20 pt-6 sm:px-6 lg:px-8">
         <div className={`mb-4 flex items-center justify-between gap-4 ${hudSidebar ? 'pr-[0px] sm:pr-[24rem]' : ''}`}>
           <div className="flex items-center gap-4">
@@ -152,6 +161,8 @@ export default function Page() {
             onTargetFpsChange={(fps) => galaxy.api?.setTargetFps?.(fps)}
             performanceMode={galaxy.api?.getPerformanceMode ? galaxy.api.getPerformanceMode() : false}
             onPerformanceModeToggle={() => galaxy.api?.setPerformanceMode?.(!galaxy.api?.getPerformanceMode?.())}
+            showFpsCounter={showFpsCounter}
+            onFpsCounterToggle={() => setShowFpsCounter(v => !v)}
           />
         </div>
 
