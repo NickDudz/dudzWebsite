@@ -75,7 +75,7 @@ export type GalaxyAPI = {
   purchase: (key: keyof Upgrades) => void
   purchaseIQ: (key: 'computeMult' | 'autoCollect' | 'confetti' | 'palette') => void
   triggerEffect: (name: "confetti" | "palette") => void
-  getStats: () => { tokensPerSec: number; coresByLevel: number[] }
+  getStats: () => { tokensPerSec: number; coresByLevel: number[]; totalEverCollected: number; currentFloatingData: number }
   setTargetFps: (fps: number) => void
   getTargetFps: () => number
   setPerformanceMode: (lowQuality: boolean) => void
@@ -136,7 +136,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const LEVEL_RATE = [1, 2, 4, 6, 8] // tokens/sec for levels 1..5
 
   // Persisted bits
-  type Persisted = { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }; lastSeen: number }
+  type Persisted = { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }; lastSeen: number; totalEverCollected: number }
   const persisted = useRef<Persisted | null>(null)
   const [uiState, setUiState] = useState<GalaxyState>(() => ({
     tokens: 0,
@@ -157,6 +157,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   
   // Orbital movement
   const orbitalAngles = useRef<number[]>([])
+  const orbitalRadii = useRef<number[]>([]) // Individual radius per core
+  const orbitalSpeeds = useRef<number[]>([]) // Individual orbital speed per core
+  const bouncePeriods = useRef<number[]>([]) // Individual bounce period per core
+  const bouncePhases = useRef<number[]>([]) // Individual bounce phase offset per core
   const orbitalCenter = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const orbitalRadius = useRef<number>(0)
 
@@ -260,11 +264,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const W = worldW.current
     const H = worldH.current
 
-    // Update orbital center and radius
+    // Update orbital center and base radius
     orbitalCenter.current = { x: W * 0.5, y: H * 0.5 }
     orbitalRadius.current = Math.min(W, H) * 0.25
 
-    // Initialize orbital angles for new cores only (preserve existing angles)
+    // Initialize orbital angles and radii for new cores only (preserve existing)
     while (orbitalAngles.current.length < clusters.current.length) {
       const newIndex = orbitalAngles.current.length
       // Distribute evenly around the full circle with some randomization
@@ -280,42 +284,110 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       orbitalAngles.current.push(blendedAngle + randomOffset)
     }
 
-    const orbitalSpeed = 0.4 // radians per second - reduced by 50%
-    const waveAmplitude = 15 // pixels - reduced for smoother motion
-    const waveFrequency = 1.2 // waves per second - increased frequency
+    // Initialize varied orbital radii for new cores based on level
+    while (orbitalRadii.current.length < clusters.current.length) {
+      const coreIndex = orbitalRadii.current.length
+      const core = clusters.current[coreIndex]
+      const baseRadius = orbitalRadius.current
+
+      // Level-based radius: smaller cores closer to center, larger cores further out
+      const levelFactor = (core.level - 1) * 0.08 // Each level adds 8% to radius
+      const stackFactor = (core.stackCount || 1) > 1 ? 0.05 : 0 // Stacked cores slightly further out
+      const randomVariation = (Math.random() - 0.5) * 0.1 // Small random variation (±5%)
+
+      const radiusMultiplier = 0.85 + levelFactor + stackFactor + randomVariation
+      const individualRadius = baseRadius * radiusMultiplier
+      orbitalRadii.current.push(individualRadius)
+    }
+
+    // Initialize bounce parameters for new cores
+    while (bouncePeriods.current.length < clusters.current.length) {
+      // Varied bounce periods with light randomness for visual stimuli
+      const bounceFrequency = 0.4 + Math.random() * 1.2 // 0.4 to 1.6 Hz (light expansion)
+      bouncePeriods.current.push(bounceFrequency)
+    }
+
+    while (bouncePhases.current.length < clusters.current.length) {
+      // Random phase offset so cores don't all bounce in sync
+      const phaseOffset = Math.random() * Math.PI * 2
+      bouncePhases.current.push(phaseOffset)
+    }
+
+    // Initialize varied orbital speeds for new cores
+    while (orbitalSpeeds.current.length < clusters.current.length) {
+      // Light randomness: base 0.4 ± 15% variation (0.34 to 0.46 rad/s)
+      const baseSpeed = 0.4
+      const speedVariation = (Math.random() - 0.5) * 0.12 // ±15% variation (0.12/2 = 0.06 = 15% of 0.4)
+      const individualSpeed = baseSpeed * (1 + speedVariation)
+      orbitalSpeeds.current.push(individualSpeed)
+    }
 
     clusters.current.forEach((cluster, i) => {
-      // This should now be handled by the while loop above, but safety check
+      // Safety check - shouldn't be needed but just in case
       if (i >= orbitalAngles.current.length) {
         const goldenAngle = Math.PI * (3 - Math.sqrt(5))
         const distributedAngle = (i * goldenAngle) % (Math.PI * 2)
         orbitalAngles.current.push(distributedAngle + (Math.random() - 0.5) * Math.PI * 0.1)
+      }
+      if (i >= orbitalRadii.current.length) {
+        const core = clusters.current[i]
+        const baseRadius = orbitalRadius.current
+        const levelFactor = (core.level - 1) * 0.08
+        const stackFactor = (core.stackCount || 1) > 1 ? 0.05 : 0
+        const randomVariation = (Math.random() - 0.5) * 0.1
+        const radiusMultiplier = 0.85 + levelFactor + stackFactor + randomVariation
+        orbitalRadii.current.push(baseRadius * radiusMultiplier)
+      }
+      if (i >= bouncePeriods.current.length) {
+        const bounceFrequency = 0.45 + Math.random() * 1.0
+        bouncePeriods.current.push(bounceFrequency)
+      }
+      if (i >= bouncePhases.current.length) {
+        const phaseOffset = Math.random() * Math.PI * 2
+        bouncePhases.current.push(phaseOffset)
       }
 
       // Track previous position for velocity calculation
       const prevX = cluster.x
       const prevY = cluster.y
 
-      // Update angle - ensure continuous motion
-      orbitalAngles.current[i] += orbitalSpeed * dt
+      // Update angle - ensure continuous motion WITHOUT normalization to prevent jitter
+      const individualSpeed = orbitalSpeeds.current[i] || 0.4 // Fallback to base speed
+      orbitalAngles.current[i] += individualSpeed * dt
 
-      // Normalize angle to prevent overflow
-      orbitalAngles.current[i] = orbitalAngles.current[i] % (Math.PI * 2)
+      // Use stored radius if available, otherwise calculate new one
+      let coreRadius = orbitalRadii.current[i]
+      if (coreRadius === undefined) {
+        const baseRadius = orbitalRadius.current
+        const levelFactor = (cluster.level - 1) * 0.08
+        const stackFactor = (cluster.stackCount || 1) > 1 ? 0.05 : 0
+        const randomVariation = (Math.random() - 0.5) * 0.1
+        const radiusMultiplier = 0.85 + levelFactor + stackFactor + randomVariation
+        coreRadius = baseRadius * radiusMultiplier
+        orbitalRadii.current[i] = coreRadius
+      }
 
-      // Calculate base orbital position
+      // Calculate base orbital position using individual radius
       const angle = orbitalAngles.current[i]
-      const baseX = orbitalCenter.current.x + Math.cos(angle) * orbitalRadius.current
-      const baseY = orbitalCenter.current.y + Math.sin(angle) * orbitalRadius.current
+      const baseX = orbitalCenter.current.x + Math.cos(angle) * coreRadius
+      const baseY = orbitalCenter.current.y + Math.sin(angle) * coreRadius
 
-      // Add wavy motion using performance.now() for consistent timing
+      // Add bouncy motion tangent to the orbital path
       const timeMs = performance.now()
-      const waveOffset = Math.sin(angle * waveFrequency + timeMs * 0.001) * waveAmplitude
-      const perpendicularAngle = angle + Math.PI / 2
-      const waveX = Math.cos(perpendicularAngle) * waveOffset
-      const waveY = Math.sin(perpendicularAngle) * waveOffset
+      const bounceFreq = bouncePeriods.current[i]
+      const bouncePhase = bouncePhases.current[i]
+      const bounceTime = timeMs * 0.001 * bounceFreq + bouncePhase
 
-      cluster.x = baseX + waveX
-      cluster.y = baseY + waveY
+      // Bounce amplitude varies slightly by core level for more variety
+      const levelBasedAmplitude = 20 + (cluster.level - 1) * 20 // 8-16px amplitude
+      const bounceOffset = Math.sin(bounceTime) * levelBasedAmplitude
+
+      // Calculate radial direction for perpendicular (inward/outward) bounce
+      const bounceX = Math.cos(angle) * bounceOffset
+      const bounceY = Math.sin(angle) * bounceOffset
+
+      cluster.x = baseX + bounceX
+      cluster.y = baseY + bounceY
 
       // Calculate velocity for predictive positioning
       cluster.vx = (cluster.x - prevX) / dt
@@ -424,7 +496,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const upgrades = sanitizeUpgrades(upgradesRaw ? JSON.parse(upgradesRaw) : {})
       const iqUpgrades = sanitizeIQUpgrades(iqUpRaw ? JSON.parse(iqUpRaw) : {})
       const lastSeen = lastSeenRaw ? (parseInt(lastSeenRaw, 10) || Date.now()) : Date.now()
-      persisted.current = { tokens, iq, upgrades, iqUpgrades, lastSeen }
+      const totalEverCollected = 0 // Will be loaded separately if it exists
+      persisted.current = { tokens, iq, upgrades, iqUpgrades, lastSeen, totalEverCollected }
       setUiState({ tokens, iq, upgrades, iqUpgrades })
       // Offline trickle
       const minutes = (Date.now() - lastSeen) / 60000
@@ -436,12 +509,13 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     } catch (error) {
       console.warn('Failed to load game state from localStorage:', error)
       // Initialize with default values if localStorage fails
-      persisted.current = { 
-        tokens: 0, 
-        iq: 0, 
-        upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }, 
-        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false }, 
-        lastSeen: Date.now() 
+      persisted.current = {
+        tokens: 0,
+        iq: 0,
+        upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 },
+        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
+        lastSeen: Date.now(),
+        totalEverCollected: 0
       }
       setUiState({ 
         tokens: 0, 
@@ -1452,7 +1526,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       let tps = 0
       for (let i = 0; i < counts.length; i++) tps += LEVEL_RATE[i] * counts[i]
       tps *= computeMult
-      return { tokensPerSec: tps, coresByLevel: counts }
+      const totalEverCollected = persisted.current?.totalEverCollected ?? 0
+      const currentFloatingData = points.current.filter(p => p.state === 'outlier').length
+      return { tokensPerSec: tps, coresByLevel: counts, totalEverCollected, currentFloatingData }
     },
     // Debug functions for testing
     debug: {
