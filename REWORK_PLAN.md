@@ -22,7 +22,7 @@
 
 ### Phase 3: UX Improvements
 - [ ] Add simple tutorial overlay
-- [ ] Improve HUD design and visibility
+- [x] Improve HUD design and visibility — GalaxyUI now a dropdown with expandable right sidebar; sticky header shows key stats; larger mobile-friendly buttons
 - [ ] Add progress indicators for upgrades
 - [ ] Enhance visual feedback for user actions
 
@@ -120,12 +120,37 @@
 
 ## ✅ Success Criteria
 
+- [x] Single core game initialization (completed - game starts with 1 core at top middle)
+- [x] Tiny glowing data piece tutorial (completed - replaced giant button with subtle data piece)
+- [x] Improved sidebar formatting (completed - optimized text sizes, spacing, and layout)
+- [x] Performance optimizations (completed - added FPS monitoring, reduced motion auto-adjustment, canvas optimizations)
 - [ ] All TypeScript errors resolved with strict mode enabled
 - [ ] No memory leaks detected in 10+ minute sessions
 - [ ] Tutorial successfully introduces new users to the game
 - [ ] Performance remains stable at 60 FPS
 - [ ] Code is maintainable with clear module separation
 - [ ] Portfolio content remains the primary focus
+
+## 📝 Recent Changes (Completed)
+
+### Game Flow Improvements
+- ✅ **Single Core Start**: Game now initializes with only 1 core positioned at top middle of screen (not covered by HUD)
+- ✅ **Subtle Tutorial**: Replaced giant "Click Me" button with tiny glowing data piece next to core
+- ✅ **Better UX**: Added animated arrow and "Click Me" text pointing to the data piece
+- ✅ **Auto HUD**: HUD opens automatically when game starts with intro popup
+
+### UI/UX Enhancements
+- ✅ **GalaxyUI Revamp**: New top-right dropdown trigger; expandable right sidebar; sticky header with Tokens, IQ, Cores L1–L5 and Total; Total Collected and Currently Processing; upgrades moved under header; larger mobile-friendly buttons; Galaxy toggle removed from HUD
+- ✅ **Compact Sidebar**: Optimized text sizes (10px-12px), reduced padding/margins, better spacing
+- ✅ **Bulk Upgrade UI**: Streamlined quantity selectors and purchase buttons
+- ✅ **IQ Upgrade Layout**: More compact display with abbreviated labels
+- ✅ **Responsive Design**: Better text fitting and reduced wasted space
+
+### Performance Optimizations
+- ✅ **FPS Monitoring**: Real-time FPS tracking with automatic reduced motion when FPS < 30
+- ✅ **Canvas Optimization**: Added image smoothing and composite operation settings
+- ✅ **Memory Management**: Improved cleanup and reduced unnecessary operations
+- ✅ **Auto-Adjustment**: Smart performance scaling based on system capabilities
 
 ## 📝 Notes
 

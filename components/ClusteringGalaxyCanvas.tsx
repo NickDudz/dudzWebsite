@@ -21,7 +21,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
 
   // Register canvas with the hook so its single RAF can draw into it
   useEffect(() => {
-    if (!canvasRef.current) return
+    if (!canvasRef.current || !api?.registerCanvas) return
     unregisterRef.current = api.registerCanvas(canvasRef.current)
     return () => unregisterRef.current?.()
   }, [api])
@@ -62,12 +62,13 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
   // Map clicks to hook clickAt
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || !api?.clickAt) return
     const onClick = (e: MouseEvent) => {
       if (!enabled) return
       const rect = canvas.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
+      console.log('Canvas click:', { x, y, canvasSize: { w: canvas.clientWidth, h: canvas.clientHeight }, rect })
       api.clickAt(x, y)
     }
     canvas.addEventListener("click", onClick)

@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "set NODE_ENV=development&& next dev",
+    "build": "set NODE_ENV=production&& next build",
+    "build:safe": "node scripts/safe-build.mjs",
+    "dev:safe": "node scripts/safe-build.mjs --dev",
     "start": "next start",
     "lint": "next lint",
     "test:galaxy": "node tests/galaxy.spec.js"

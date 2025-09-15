@@ -36,6 +36,7 @@ export type Point = {
   orbitPhase?: number
   targetCluster?: number
   captureT?: number
+  rotationOffset?: number // For star rotation sync
 }
 
 export type Cluster = {
@@ -67,14 +68,27 @@ export type GalaxyAPI = {
   purchaseIQ: (key: 'computeMult' | 'autoCollect' | 'confetti' | 'palette') => void
   triggerEffect: (name: "confetti" | "palette") => void
   getStats: () => { tokensPerSec: number; coresByLevel: number[] }
+  setTargetFps: (fps: number) => void
+  getTargetFps: () => number
+  setPerformanceMode: (lowQuality: boolean) => void
+  getPerformanceMode: () => boolean
+  debug: {
+    addTokens: (amount: number) => void
+    addIQ: (amount: number) => void
+    addCores: (levels: number[]) => void
+    setUpgradeLevel: (upgradeKey: keyof Upgrades, level: number) => void
+    setIQUpgradeLevel: (upgradeKey: keyof NonNullable<GalaxyState['iqUpgrades']>, level: number) => void
+  }
 }
 
 export type UseClusteringGalaxyOptions = {
   enabled?: boolean
+  orbitalMode?: boolean
 }
 
 export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const enabled = opts.enabled ?? true
+  const orbitalMode = opts.orbitalMode ?? false
 
   // Constants (initial balancing in BALANCING.md)
   const PASSIVE_BASE = 1
@@ -85,12 +99,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const PULSE_MIN = 5.0
   const PULSE_MAX = 9.0
   const GLOW_MS = 200
-  const AMBIENT_COUNT = 400
-  const CLICK_RADIUS = 22
+  const AMBIENT_COUNT = 520 // More ambient pages to cover large screens
+  const CLICK_RADIUS = 48 // Increased for better click detection
   const WRAP_PAD = 8
   const MAX_DT = 0.05 // seconds cap
   const SPAWN_MARGIN = 28
-  const TOP_EXCLUDE = 140
+  const TOP_EXCLUDE = 60
   const EDGE_SPAWN_PAD = 24
 
   const COLORS = useMemo(() => [
@@ -126,6 +140,16 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const lastTick = useRef<number>(0)
   const reducedMotion = useRef<boolean>(false)
   const autoAcc = useRef<number>(0)
+  const firstL2Notified = useRef<boolean>(false)
+  const firstMaxNotified = useRef<boolean>(false)
+  
+  // Orbital movement
+  const orbitalAngles = useRef<number[]>([])
+  const orbitalCenter = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
+  const orbitalRadius = useRef<number>(0)
+
+  // Star rotation sync for lightweight floating data rotation
+  const starRotationTime = useRef<number>(0)
 
   // Draw snapshot (stable reference)
   const snapshot = useRef<DrawSnapshot>({ width: 0, height: 0, parallaxY: 0, points: [] })
@@ -133,6 +157,24 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
   // Registered canvases
   const canvases = useRef<Set<HTMLCanvasElement>>(new Set())
+
+  // Stable state ref for API closures to avoid stale captures
+  const uiStateRef = useRef<GalaxyState>(uiState)
+  useEffect(() => { uiStateRef.current = uiState }, [uiState])
+
+  // Performance controls
+  const targetFps = useRef<number>(30)
+  const frameBudgetMs = useRef<number>(1000 / targetFps.current)
+  const lastFrameMs = useRef<number>(performance.now())
+  const lowQualityMode = useRef<boolean>(false)
+  const pageVisible = useRef<boolean>(true)
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const onVis = () => { pageVisible.current = !document.hidden }
+    document.addEventListener('visibilitychange', onVis)
+    onVis() // Initialize immediately
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
 
   // Internal helpers
   function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)) }
@@ -150,6 +192,31 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     return Math.round(base[key] * Math.pow(1.6, level))
   }
 
+  // Persistence sanitizers to prevent localStorage corruption from crashing
+  function toSafeInt(value: unknown, fallback = 0): number {
+    const n = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10)
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback
+  }
+  function sanitizeUpgrades(raw: any): Upgrades {
+    const safe: Upgrades = {
+      spawnRate: toSafeInt(raw?.spawnRate, 0),
+      spawnQty: toSafeInt(raw?.spawnQty, 0),
+      clickYield: toSafeInt(raw?.clickYield, 0),
+      batchCollect: toSafeInt(raw?.batchCollect, 0),
+    }
+    const dq = raw?.dataQuality
+    if (dq != null) safe.dataQuality = Math.max(0, Math.min(2, toSafeInt(dq, 0)))
+    return safe
+  }
+  function sanitizeIQUpgrades(raw: any): GalaxyState['iqUpgrades'] {
+    return {
+      computeMult: toSafeInt(raw?.computeMult, 0),
+      autoCollect: toSafeInt(raw?.autoCollect, 0),
+      confettiUnlocked: Boolean(raw?.confettiUnlocked),
+      paletteUnlocked: Boolean(raw?.paletteUnlocked),
+    }
+  }
+
   function computeOfflineTrickle(minutes: number) {
     const m = clamp(minutes, 0, 30)
     // Approximate using level-1 rate and current compute multiplier
@@ -157,6 +224,55 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const perSec = 1 * computeMult * Math.max(1, clusters.current.length)
     const approx = perSec * 60 * m * 0.12
     return Math.floor(approx)
+  }
+
+  function updateOrbitalMovement(dt: number) {
+    const W = worldW.current
+    const H = worldH.current
+
+    // Update orbital center and radius
+    orbitalCenter.current = { x: W * 0.5, y: H * 0.5 }
+    orbitalRadius.current = Math.min(W, H) * 0.25
+
+    // Initialize orbital angles if needed
+    if (orbitalAngles.current.length !== clusters.current.length) {
+      orbitalAngles.current = clusters.current.map((_, i) => {
+        const baseAngle = (i / Math.max(1, clusters.current.length)) * Math.PI * 2
+        const randomOffset = (Math.random() - 0.5) * Math.PI * 0.3
+        return baseAngle + randomOffset
+      })
+    }
+
+    const orbitalSpeed = 0.8 // radians per second - increased for more visible motion
+    const waveAmplitude = 15 // pixels - reduced for smoother motion
+    const waveFrequency = 1.2 // waves per second - increased frequency
+
+    clusters.current.forEach((cluster, i) => {
+      if (i >= orbitalAngles.current.length) {
+        orbitalAngles.current.push(Math.random() * Math.PI * 2)
+      }
+
+      // Update angle - ensure continuous motion
+      orbitalAngles.current[i] += orbitalSpeed * dt
+
+      // Normalize angle to prevent overflow
+      orbitalAngles.current[i] = orbitalAngles.current[i] % (Math.PI * 2)
+
+      // Calculate base orbital position
+      const angle = orbitalAngles.current[i]
+      const baseX = orbitalCenter.current.x + Math.cos(angle) * orbitalRadius.current
+      const baseY = orbitalCenter.current.y + Math.sin(angle) * orbitalRadius.current
+
+      // Add wavy motion using performance.now() for consistent timing
+      const timeMs = performance.now()
+      const waveOffset = Math.sin(angle * waveFrequency + timeMs * 0.001) * waveAmplitude
+      const perpendicularAngle = angle + Math.PI / 2
+      const waveX = Math.cos(perpendicularAngle) * waveOffset
+      const waveY = Math.sin(perpendicularAngle) * waveOffset
+
+      cluster.x = baseX + waveX
+      cluster.y = baseY + waveY
+    })
   }
 
   // Window size for world bounds (CSS pixels)
@@ -207,11 +323,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       try { mq.addEventListener("change", onChange) } catch { mq.addListener(onChange as any) }
     }
 
-    // Clusters: nice anchors (normalized)
+    // Clusters: single core at top middle
     const anchors = [
-      { x: 0.50, y: 0.10 }, // Top center, above panels area (nudged up)
-      { x: 0.22, y: 0.60 }, // Left mid
-      { x: 0.78, y: 0.60 }, // Right mid
+      { x: 0.50, y: 0.12 }, // Single core at top center
     ]
     clusters.current = anchors.map((a, i) => ({
       id: i,
@@ -234,27 +348,29 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         id: i,
         x: SPAWN_MARGIN + Math.random() * Math.max(0, worldW.current - SPAWN_MARGIN * 2),
         y: Math.max(TOP_EXCLUDE, SPAWN_MARGIN + Math.random() * Math.max(0, worldH.current - SPAWN_MARGIN * 2 - TOP_EXCLUDE)),
-        vx: rand(-0.04, 0.04),
-        vy: rand(-0.04, 0.04),
+        // velocities in px/sec (gentle drift)
+        vx: rand(-12, 12),
+        vy: rand(-12, 12),
         state: "ambient",
         age: 0,
         alpha: rand(0.18, 0.48),
+        rotationOffset: Math.random() * Math.PI * 2, // Random offset for star rotation sync
       }
     }
     points.current = arr
 
-    // Load persistence
+    // Load persistence (validated)
     try {
       const tokensRaw = localStorage.getItem("galaxy.tokens")
       const iqRaw = localStorage.getItem("galaxy.iq")
       const upgradesRaw = localStorage.getItem("galaxy.upgrades")
       const iqUpRaw = localStorage.getItem("galaxy.iqUpgrades")
       const lastSeenRaw = localStorage.getItem("galaxy.lastSeen")
-      const tokens = tokensRaw ? parseInt(tokensRaw, 10) || 0 : 0
-      const iq = iqRaw ? parseInt(iqRaw, 10) || 0 : 0
-      const upgrades: Upgrades = upgradesRaw ? JSON.parse(upgradesRaw) : { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }
-      const iqUpgrades = iqUpRaw ? JSON.parse(iqUpRaw) : { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false }
-      const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw, 10) || Date.now() : Date.now()
+      const tokens = tokensRaw ? (parseInt(tokensRaw, 10) || 0) : 0
+      const iq = iqRaw ? (parseInt(iqRaw, 10) || 0) : 0
+      const upgrades = sanitizeUpgrades(upgradesRaw ? JSON.parse(upgradesRaw) : {})
+      const iqUpgrades = sanitizeIQUpgrades(iqUpRaw ? JSON.parse(iqUpRaw) : {})
+      const lastSeen = lastSeenRaw ? (parseInt(lastSeenRaw, 10) || Date.now()) : Date.now()
       persisted.current = { tokens, iq, upgrades, iqUpgrades, lastSeen }
       setUiState({ tokens, iq, upgrades, iqUpgrades })
       // Offline trickle
@@ -264,10 +380,26 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         persisted.current.tokens += add
         setUiState(s => ({ ...s, tokens: persisted.current!.tokens }))
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.warn('Failed to load game state from localStorage:', error)
+      // Initialize with default values if localStorage fails
+      persisted.current = { 
+        tokens: 0, 
+        iq: 0, 
+        upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }, 
+        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false }, 
+        lastSeen: Date.now() 
+      }
+      setUiState({ 
+        tokens: 0, 
+        iq: 0, 
+        upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }, 
+        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false } 
+      })
+    }
 
-    // Spawn cooldown
-    spawnCooldown.current = BASE_SPAWN / (1 + uiState.upgrades.spawnRate * 0.15)
+    // Initial spawn cooldown (will be updated by effect)
+    spawnCooldown.current = BASE_SPAWN
 
     return () => {
       if (mq && onChange) {
@@ -288,7 +420,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         localStorage.setItem("galaxy.iqUpgrades", JSON.stringify(persisted.current.iqUpgrades))
         localStorage.setItem("galaxy.iq", String(persisted.current.iq))
         localStorage.setItem("galaxy.lastSeen", String(Date.now()))
-      } catch { /* ignore */ }
+      } catch (error) {
+        console.warn('Failed to save game state to localStorage:', error)
+      }
       t = window.setTimeout(write, 1500)
     }
     t = window.setTimeout(write, 1500)
@@ -301,7 +435,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           localStorage.setItem("galaxy.iq", String(persisted.current.iq))
           localStorage.setItem("galaxy.lastSeen", String(Date.now()))
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        console.warn('Failed to save game state on unload:', error)
+      }
     }
     window.addEventListener("beforeunload", onUnload)
     return () => {
@@ -310,25 +446,66 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     }
   }, [enabled])
 
-  // Single RAF game loop + drawing to registered canvases
+  // Optimized RAF game loop with performance monitoring
   useEffect(() => {
     if (!enabled) return
     let raf = 0
+    let frameCount = 0
+    let lastFpsUpdate = performance.now()
+    let currentFps = 60
+
     lastTick.current = performance.now()
+
     const step = () => {
       const now = performance.now()
       let dt = (now - lastTick.current) / 1000
       lastTick.current = now
-      if (dt > 0.25) dt = 0.25 // catch-up cap to avoid explosive physics after tab restore
 
-      if (!reducedMotion.current) {
-        simulate(Math.min(dt, MAX_DT))
+      // Throttle to target FPS and pause when page not visible
+      const elapsedSinceLast = now - lastFrameMs.current
+      if (!pageVisible.current || elapsedSinceLast < frameBudgetMs.current) {
+        raf = requestAnimationFrame(step)
+        return
       }
-      renderAll()
+      lastFrameMs.current = now
+
+      // Performance monitoring
+      frameCount++
+      if (now - lastFpsUpdate >= 1000) {
+        currentFps = frameCount
+        frameCount = 0
+        lastFpsUpdate = now
+
+        // Auto-adjust for performance if FPS drops too low
+        if (currentFps < 30 && !reducedMotion.current) {
+          reducedMotion.current = true
+          console.log('Performance: Auto-enabled reduced motion due to low FPS')
+        } else if (currentFps > 50 && reducedMotion.current) {
+          reducedMotion.current = false
+          console.log('Performance: Auto-disabled reduced motion')
+        }
+      }
+
+      // Cap delta time and prevent large jumps
+      if (dt > 0.25) dt = 0.25
+
+      // Simulate always; use consistent small timestep for stability
+      const simDt = Math.min(dt, MAX_DT)
+      simulate(simDt)
+
+      // Always render (but optimize if needed)
+      try {
+        renderAll()
+      } catch (err) {
+        console.warn('Render error, skipping frame:', err)
+      }
       raf = requestAnimationFrame(step)
     }
+
     raf = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled])
 
@@ -337,13 +514,29 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const W = worldW.current
     const H = worldH.current
 
+    // Update star rotation time for ambient point sync (lightweight)
+    starRotationTime.current += dt * 0.1 // Slow rotation sync with stars
+
+    // Update orbital movement if enabled
+    if (orbitalMode) {
+      updateOrbitalMovement(dt)
+    }
+
     for (let i = 0; i < points.current.length; i++) {
       const p = points.current[i]
       p.age += dt
-      // gentle drift for ambient and outliers
+      // gentle drift for ambient and outliers (velocities are px/sec)
       if (p.state === "ambient" || p.state === "outlier") {
-        p.x += p.vx
-        p.y += p.vy
+        p.x += p.vx * dt
+        p.y += p.vy * dt
+
+        // Lightweight star rotation sync for ambient points only (not performance critical)
+        if (p.state === "ambient" && p.rotationOffset !== undefined && !lowQualityMode.current) {
+          const rotationRadius = 1.0 // Slightly increased for more visible effect
+          const rotationAngle = starRotationTime.current + p.rotationOffset
+          p.x += Math.cos(rotationAngle) * rotationRadius * dt
+          p.y += Math.sin(rotationAngle) * rotationRadius * dt
+        }
       }
       if (p.state === "ambient" || p.state === "clustered") {
         // clustered moves toward centroid lazily
@@ -391,13 +584,14 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           p.vy = rand(-0.05, 0.05)
           p.x = SPAWN_MARGIN + Math.random() * Math.max(0, W - SPAWN_MARGIN * 2)
           p.y = Math.max(TOP_EXCLUDE, SPAWN_MARGIN + Math.random() * Math.max(0, H - SPAWN_MARGIN * 2 - TOP_EXCLUDE))
+          p.rotationOffset = Math.random() * Math.PI * 2 // Reset rotation offset
         }
       } else if (p.state === 'capturing' && p.targetCluster != null) {
         const c = clusters.current[p.targetCluster]
         const dx = c.x - p.x
         const dy = c.y - p.y
         const dist = Math.hypot(dx, dy)
-        const spd = 260
+        const spd = 300
         const nx = dx / (dist || 1)
         const ny = dy / (dist || 1)
         p.x += nx * spd * dt
@@ -428,6 +622,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
                 firstL2Notified.current = true
                 try { window.dispatchEvent(new CustomEvent("galaxy-effect", { detail: { name: "l2-reached", t: Date.now() } })) } catch {}
               }
+              // first time any core reaches level 5: notify
+              if (c2.level >= 5 && !firstMaxNotified.current) {
+                firstMaxNotified.current = true
+                try { window.dispatchEvent(new CustomEvent("galaxy-effect", { detail: { name: "first-max", t: Date.now() } })) } catch {}
+              }
             } else {
               consumeMembers(p.targetCluster, 10)
               if (persisted.current) {
@@ -447,9 +646,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const currentOutliers = points.current.reduce((n, p) => n + (p.state === "outlier" ? 1 : 0), 0)
     spawnCooldown.current -= dt
     if (spawnCooldown.current <= 0) {
-      const chanceBoost = 1 + uiState.upgrades.spawnRate * 0.2
-      const baseInterval = Math.max(2.5, BASE_SPAWN / chanceBoost)
-      const qty = Math.min(5, 1 + uiState.upgrades.spawnQty)
+      // Use persisted upgrades for consistent values
+      const upgrades = persisted.current?.upgrades || { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }
+      const spawnRateBoost = 1 + (upgrades.spawnRate || 0) * 0.2
+      const baseInterval = Math.max(2.5, BASE_SPAWN / spawnRateBoost)
+      const qty = Math.min(5, 1 + (upgrades.spawnQty || 0))
       const toSpawn = Math.min(qty, Math.max(0, 10 - currentOutliers))
       for (let s = 0; s < toSpawn; s++) {
         const ambientIdx = findAmbientIndex()
@@ -460,9 +661,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           const fromLeft = Math.random() < 0.5
           p.x = fromLeft ? -EDGE_SPAWN_PAD : W + EDGE_SPAWN_PAD
           p.y = Math.max(TOP_EXCLUDE + 10, SPAWN_MARGIN + Math.random() * Math.max(0, H - SPAWN_MARGIN * 2 - TOP_EXCLUDE))
-          const baseV = 0.4 + Math.random() * 0.3
+          // velocities in px/sec for smooth cross-screen motion
+          const baseV = 150 + Math.random() * 50 // 150..200 px/s for faster, more visible motion
           p.vx = fromLeft ? baseV : -baseV
-          p.vy = rand(-0.1, 0.1)
+          p.vy = rand(-15, 15) // Reduced vertical variance for more predictable motion
         }
       }
       spawnCooldown.current = rand(baseInterval * 0.6, baseInterval * 1.4)
@@ -541,7 +743,6 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     return best
   }
 
-  let firstMaxNotified = false
   function convertOutlier(idx: number) {
     const p = points.current[idx]
     const cIdx = nearestCluster(p.x, p.y)
@@ -577,6 +778,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       p.vy = rand(-0.05, 0.05)
       p.x = SPAWN_MARGIN + Math.random() * Math.max(0, W - SPAWN_MARGIN * 2)
       p.y = SPAWN_MARGIN + Math.random() * Math.max(0, H - SPAWN_MARGIN * 2)
+      p.rotationOffset = Math.random() * Math.PI * 2 // Reset rotation offset
       c.members = Math.max(0, c.members - 1)
     }
     if (c.webIndices.length) {
@@ -635,13 +837,21 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     snapshot.current.parallaxY = 0
     let n = 0
     // Ambient/clustered points
+    const cullMargin = 50 // Extra margin for viewport culling
     for (let i = 0; i < points.current.length; i++) {
       const p = points.current[i]
       if (p.state === "ambient" || p.state === "clustered") {
+        // Basic viewport culling in low quality mode
+        if (lowQualityMode.current &&
+            (p.x < -cullMargin || p.x > W + cullMargin ||
+             p.y < -cullMargin || p.y > H + cullMargin)) {
+          continue
+        }
+
         const rec = drawBuffer[n++]
         rec.x = p.x
         rec.y = p.y
-        rec.radius = p.state === "ambient" ? 1.2 : 1.6
+        rec.radius = p.state === "ambient" ? 1.6 : 1.8
         rec.alpha = p.alpha
         rec.color = p.state === "ambient" ? 1 : 2
         rec.shape = 'icon'
@@ -697,181 +907,215 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const snap = snapshot.current
     // Render into each registered canvas context
     canvases.current.forEach((canvas) => {
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return
-      const dpr = window.devicePixelRatio || 1
-      const cssW = canvas.clientWidth
-      const cssH = canvas.clientHeight
-      const needResize = canvas.width !== Math.floor(cssW * dpr) || canvas.height !== Math.floor(cssH * dpr)
-      if (needResize) {
-        canvas.width = Math.floor(cssW * dpr)
-        canvas.height = Math.floor(cssH * dpr)
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      }
-      // Clear
-      ctx.clearRect(0, 0, cssW, cssH)
-      // Web connections: faint lines from centroid to a few members
-      ctx.save()
-      ctx.lineWidth = 1
-      ctx.globalAlpha = 0.08
-      for (let i = 0; i < clusters.current.length; i++) {
-        const c = clusters.current[i]
-        ctx.strokeStyle = COLORS[c.colorIndex] || COLORS[0]
-        const web = c.webIndices
-        for (let k = 0; k < web.length; k++) {
-          const p = points.current[web[k]]
-          if (!p || p.state !== "clustered") continue
-          ctx.beginPath()
-          ctx.moveTo(c.x, c.y)
-          ctx.lineTo(p.x, p.y)
-          ctx.stroke()
+      try {
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+        const dpr = window.devicePixelRatio || 1
+        const cssW = canvas.clientWidth
+        const cssH = canvas.clientHeight
+        const needResize = canvas.width !== Math.floor(cssW * dpr) || canvas.height !== Math.floor(cssH * dpr)
+        if (needResize) {
+          canvas.width = Math.floor(cssW * dpr)
+          canvas.height = Math.floor(cssH * dpr)
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
         }
-      }
-      ctx.restore()
-      // Draw in order; halos as circles, cores as CPU icons, others as page icons
-      for (let i = 0; i < snap.points.length; i++) {
-        const r = snap.points[i]
-        const color = COLORS[r.color] || COLORS[0]
-        if (r.shape === 'halo') {
-          ctx.globalAlpha = r.alpha
-          ctx.fillStyle = color
-          ctx.beginPath()
-          ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2)
-          ctx.fill()
-          continue
-        }
-        if (r.shape === 'core') {
-          // CPU core glow based on progress carried in r.glow (0..1)
-          const glowFrac = Math.max(0, Math.min(1, r.glow || 0))
-          const size = r.radius * 2.4
-          const gx = r.x - size / 2
-          const gy = r.y - size / 2
-          if (glowFrac > 0) {
-            // soft base fill to make the glow read
-            ctx.globalAlpha = 0.05 * glowFrac
-            ctx.fillStyle = color
-            ctx.fillRect(gx - 1, gy - 1, size + 2, size + 2)
-            for (let pass = 3; pass >= 1; pass--) {
-              ctx.globalAlpha = 0.08 * glowFrac * (pass / 3) + 0.02 * glowFrac
-              ctx.strokeStyle = color
-              ctx.lineWidth = 1 + pass
-              ctx.strokeRect(gx - pass, gy - pass, size + pass * 2, size + pass * 2)
+        // Clear
+        ctx.clearRect(0, 0, cssW, cssH)
+
+        // Performance optimization: Configure rendering settings
+        ctx.imageSmoothingEnabled = true
+        ;(ctx as any).imageSmoothingQuality = 'medium'
+        ctx.globalCompositeOperation = 'source-over'
+
+        // Web connections: faint lines from centroid to a few members (skip in low quality)
+        if (!lowQualityMode.current) {
+          ctx.save()
+          ctx.lineWidth = 1
+          ctx.globalAlpha = 0.08
+          for (let i = 0; i < clusters.current.length; i++) {
+            const c = clusters.current[i]
+            ctx.strokeStyle = COLORS[c.colorIndex] || COLORS[0]
+            const web = c.webIndices
+            for (let k = 0; k < web.length; k++) {
+              const p = points.current[web[k]]
+              if (!p || p.state !== "clustered") continue
+              ctx.beginPath()
+              ctx.moveTo(c.x, c.y)
+              ctx.lineTo(p.x, p.y)
+              ctx.stroke()
             }
           }
-          // CPU/processor icon: small square with pins
-          const x = gx
-          const y = gy
-          // Base
-          ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
-          ctx.fillStyle = "rgba(0,0,0,0.25)"
-          ctx.fillRect(x + 0.7, y + 0.7, size, size)
-          ctx.globalAlpha = Math.min(1, r.alpha + 0.1)
-          ctx.fillStyle = color
-          ctx.fillRect(x, y, size, size)
-          ctx.globalAlpha = 1
-          ctx.strokeStyle = "rgba(0,0,0,0.6)"
-          ctx.lineWidth = 1
-          ctx.strokeRect(x, y, size, size)
-          // Pins (3 each side)
-          const pin = Math.max(1, Math.floor(size * 0.12))
-          const step = size / 4
-          ctx.strokeStyle = color
-          ctx.globalAlpha = 0.8
-          for (let k = 1; k <= 3; k++) {
-            const px = x + k * step
-            // top
-            ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px, y - pin); ctx.stroke()
-            // bottom
-            ctx.beginPath(); ctx.moveTo(px, y + size); ctx.lineTo(px, y + size + pin); ctx.stroke()
-            const py = y + k * step
-            // left
-            ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x - pin, py); ctx.stroke()
-            // right
-            ctx.beginPath(); ctx.moveTo(x + size, py); ctx.lineTo(x + size + pin, py); ctx.stroke()
-          }
-          continue
+          ctx.restore()
         }
-        // Page icon with sharp corners + diagonal fold line + scribbles
-        const dq = uiState.upgrades.dataQuality ?? 1
-        const GLOW_COLORS = { 1: "#f59e0b", 2: "#d1d5db", 3: "#facc15" }
-        const GLOW = GLOW_COLORS[Math.min(3, Math.max(1, dq)) as 1|2|3]
-        const w = r.radius * 5.8
-        const h = r.radius * 7.6
-        const x = r.x - w / 2
-        const y = r.y - h / 2
-
-        // Page-shaped glow for clickable outliers: soft fill + 3 shrinking strokes
-        if (r.glow && r.glow > 0) {
-          const prevAlpha = ctx.globalAlpha
-          // Soft base fill halo
-          ctx.globalAlpha = 0.06 * r.glow
-          ctx.fillStyle = GLOW
-          ctx.fillRect(x - 1, y - 1, w + 2, h + 2)
-          // Outer strokes (slightly thicker to thinner)
-          ctx.strokeStyle = GLOW
-          for (let pass = 3; pass >= 1; pass--) {
-            ctx.globalAlpha = 0.08 * r.glow * (pass / 3) + 0.02 * r.glow
-            ctx.lineWidth = 1 + pass
-            ctx.strokeRect(x - pass, y - pass, w + pass * 2, h + pass * 2)
-          }
-          ctx.globalAlpha = prevAlpha
-        }
-
-        // Page base: sharp rect with subtle fill and stroke + slight offset shadow
-        ctx.globalAlpha = r.alpha
-        ctx.strokeStyle = "rgba(0,0,0,0.22)"
-        ctx.lineWidth = 1
-        ctx.strokeRect(x + 0.6, y + 0.6, w, h)
-        ctx.globalAlpha = Math.min(1, r.alpha + 0.1)
-        ctx.fillStyle = "rgba(255,255,255,0.05)"
-        ctx.fillRect(x, y, w, h)
-        ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
-        ctx.strokeStyle = color
-        ctx.strokeRect(x, y, w, h)
-
-        // Diagonal fold indicator (top-right); stroke only, no fill
-        const fold = Math.max(2, Math.floor(w * 0.22))
-        ctx.beginPath()
-        ctx.moveTo(x + w - fold, y)
-        ctx.lineTo(x + w, y + fold)
-        ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
-        ctx.strokeStyle = color
-        ctx.stroke()
-
-        // Scribble lines: skip for tiny icons or background floaters
-        if (w >= 12 && h >= 12 && (r.variant ?? 0) >= 0) {
-          const padX = Math.max(2, w * 0.18)
-          const padY = Math.max(2, h * 0.18)
-          const lineH = Math.max(1, Math.floor(h * 0.08))
-          const lines = (r.variant ?? 0) % 2 === 0 ? 4 : 3
-          const vary = (r.variant ?? 0)
-          ctx.lineWidth = 1
-          ctx.strokeStyle = color
-          ctx.globalAlpha = r.alpha
-          for (let li = 0; li < lines; li++) {
-            const yy = y + padY + li * (lineH + 2)
-            const maxLen = Math.max(0, w - padX * 2 - 1)
-            const t = (li + 1 + vary) % 5
-            const len = Math.min(maxLen, w * (0.45 + 0.12 * ((t % 3))))
+        // Draw in order; halos as circles, cores as CPU icons, others as page icons
+        for (let i = 0; i < snap.points.length; i++) {
+          const r = snap.points[i]
+          const color = COLORS[r.color] || COLORS[0]
+          if (r.shape === 'halo') {
+            ctx.globalAlpha = r.alpha
+            ctx.fillStyle = color
             ctx.beginPath()
-            ctx.moveTo(x + padX, yy)
-            ctx.lineTo(x + padX + len, yy)
-            ctx.stroke()
+            ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2)
+            ctx.fill()
+            continue
+          }
+          if (r.shape === 'core') {
+            // CPU core glow based on progress carried in r.glow (0..1)
+            const glowFrac = Math.max(0, Math.min(1, r.glow || 0))
+            const size = r.radius * 2.4
+            const gx = r.x - size / 2
+            const gy = r.y - size / 2
+            if (glowFrac > 0) {
+              // soft base fill to make the glow read
+              ctx.globalAlpha = 0.05 * glowFrac
+              ctx.fillStyle = color
+              ctx.fillRect(gx - 1, gy - 1, size + 2, size + 2)
+              // Reduce glow passes in low quality mode
+              const maxPasses = lowQualityMode.current ? 1 : 3
+              for (let pass = maxPasses; pass >= 1; pass--) {
+                ctx.globalAlpha = 0.08 * glowFrac * (pass / maxPasses) + 0.02 * glowFrac
+                ctx.strokeStyle = color
+                ctx.lineWidth = 1 + pass
+                ctx.strokeRect(gx - pass, gy - pass, size + pass * 2, size + pass * 2)
+              }
+            }
+            // CPU/processor icon: small square with pins
+            const x = gx
+            const y = gy
+            // Base
+            ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
+            ctx.fillStyle = "rgba(0,0,0,0.25)"
+            ctx.fillRect(x + 0.7, y + 0.7, size, size)
+            ctx.globalAlpha = Math.min(1, r.alpha + 0.1)
+            ctx.fillStyle = color
+            ctx.fillRect(x, y, size, size)
+            ctx.globalAlpha = 1
+            ctx.strokeStyle = "rgba(0,0,0,0.6)"
+            ctx.lineWidth = 1
+            ctx.strokeRect(x, y, size, size)
+            // Pins (3 each side)
+            const pin = Math.max(1, Math.floor(size * 0.12))
+            const step = size / 4
+            ctx.strokeStyle = color
+            ctx.globalAlpha = 0.8
+            for (let k = 1; k <= 3; k++) {
+              const px = x + k * step
+              // top
+              ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px, y - pin); ctx.stroke()
+              // bottom
+              ctx.beginPath(); ctx.moveTo(px, y + size); ctx.lineTo(px, y + size + pin); ctx.stroke()
+              const py = y + k * step
+              // left
+              ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x - pin, py); ctx.stroke()
+              // right
+              ctx.beginPath(); ctx.moveTo(x + size, py); ctx.lineTo(x + size + pin, py); ctx.stroke()
+            }
+            continue
+          }
+          // Page icon with sharp corners + diagonal fold line + scribbles
+          const dq = uiStateRef.current.upgrades.dataQuality ?? 1
+          const GLOW_COLORS = { 1: "#f59e0b", 2: "#d1d5db", 3: "#facc15" }
+          const GLOW = GLOW_COLORS[Math.min(3, Math.max(1, dq)) as 1|2|3]
+          const w = r.radius * 5.8
+          const h = r.radius * 7.6
+          const x = r.x - w / 2
+          const y = r.y - h / 2
+
+          // Page-shaped glow for clickable outliers: soft fill + 3 shrinking strokes (reduced in low quality)
+          if (r.glow && r.glow > 0) {
+            const prevAlpha = ctx.globalAlpha
+            // Soft base fill halo
+            ctx.globalAlpha = 0.06 * r.glow
+            ctx.fillStyle = GLOW
+            ctx.fillRect(x - 1, y - 1, w + 2, h + 2)
+            // Outer strokes (reduced passes in low quality mode)
+            ctx.strokeStyle = GLOW
+            const maxPasses = lowQualityMode.current ? 1 : 3
+            for (let pass = maxPasses; pass >= 1; pass--) {
+              ctx.globalAlpha = 0.08 * r.glow * (pass / maxPasses) + 0.02 * r.glow
+              ctx.lineWidth = 1 + pass
+              ctx.strokeRect(x - pass, y - pass, w + pass * 2, h + pass * 2)
+            }
+            ctx.globalAlpha = prevAlpha
+          }
+
+          // Page base: sharp rect with subtle fill and stroke + slight offset shadow
+          ctx.globalAlpha = r.alpha
+          ctx.strokeStyle = "rgba(0,0,0,0.22)"
+          ctx.lineWidth = 1
+          ctx.strokeRect(x + 0.6, y + 0.6, w, h)
+          ctx.globalAlpha = Math.min(1, r.alpha + 0.1)
+          ctx.fillStyle = "rgba(255,255,255,0.05)"
+          ctx.fillRect(x, y, w, h)
+          ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
+          ctx.strokeStyle = color
+          ctx.strokeRect(x, y, w, h)
+
+          // Diagonal fold indicator (top-right); stroke only, no fill
+          const fold = Math.max(2, Math.floor(w * 0.22))
+          ctx.beginPath()
+          ctx.moveTo(x + w - fold, y)
+          ctx.lineTo(x + w, y + fold)
+          ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
+          ctx.strokeStyle = color
+          ctx.stroke()
+
+          // Scribble lines: skip for tiny icons, background floaters, or low quality mode
+          if (!lowQualityMode.current && w >= 12 && h >= 12 && (r.variant ?? 0) >= 0) {
+            const padX = Math.max(2, w * 0.18)
+            const padY = Math.max(2, h * 0.18)
+            const lineH = Math.max(1, Math.floor(h * 0.08))
+            const lines = (r.variant ?? 0) % 2 === 0 ? 4 : 3
+            const vary = (r.variant ?? 0)
+            ctx.lineWidth = 1
+            ctx.strokeStyle = color
+            ctx.globalAlpha = r.alpha
+            for (let li = 0; li < lines; li++) {
+              const yy = y + padY + li * (lineH + 2)
+              const maxLen = Math.max(0, w - padX * 2 - 1)
+              const t = (li + 1 + vary) % 5
+              const len = Math.min(maxLen, w * (0.45 + 0.12 * ((t % 3))))
+              ctx.beginPath()
+              ctx.moveTo(x + padX, yy)
+              ctx.lineTo(x + padX + len, yy)
+              ctx.stroke()
+            }
           }
         }
+        ctx.globalAlpha = 1
+      } catch (e) {
+        console.warn('Canvas draw error:', e)
       }
-      ctx.globalAlpha = 1
     })
   }
 
-  const api: GalaxyAPI = {
+  // Stabilize API identity to reduce re-renders and listener churn
+  const api: GalaxyAPI = useMemo(() => ({
     getDrawSnapshot() { return snapshot.current },
     registerCanvas(canvas) {
       if (canvas) canvases.current.add(canvas)
       return () => { if (canvas) canvases.current.delete(canvas) }
     },
+    setTargetFps(fps: number) {
+      const clamped = Math.max(15, Math.min(120, Math.round(fps)))
+      targetFps.current = clamped
+      frameBudgetMs.current = 1000 / clamped
+    },
+    getTargetFps() { return targetFps.current },
+    setPerformanceMode(v: boolean) { lowQualityMode.current = !!v },
+    getPerformanceMode() { return lowQualityMode.current },
     purchaseIQ(key) {
       if (!persisted.current) return
+      // Input validation
+      if (!key || typeof key !== 'string') {
+        console.warn('Invalid IQ upgrade key:', key)
+        return
+      }
+      const validKeys = ['computeMult', 'autoCollect', 'confetti', 'palette']
+      if (!validKeys.includes(key)) {
+        console.warn('Invalid IQ upgrade key:', key, 'Valid keys:', validKeys)
+        return
+      }
       let lvl = 0
       let cost = 0
       if (key === 'computeMult') {
@@ -901,12 +1145,25 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     },
     clickAt(x, y) {
       if (!enabled) return
+      // Input validation
+      if (typeof x !== 'number' || typeof y !== 'number' || !isFinite(x) || !isFinite(y)) {
+        console.warn('Invalid click coordinates:', { x, y })
+        return
+      }
+      // More lenient bounds checking - allow clicks slightly outside viewport
+      if (x < -50 || y < -50 || x > worldW.current + 50 || y > worldH.current + 50) {
+        console.warn('Click coordinates out of bounds:', { x, y, worldW: worldW.current, worldH: worldH.current })
+        return
+      }
+      const outlierCount = points.current.filter(p => p.state === 'outlier').length
       const idx = nearestOutlierWithin(x, y, CLICK_RADIUS)
+      console.log('Click attempt:', { x, y, outlierCount, clickRadius: CLICK_RADIUS, foundIdx: idx })
       if (idx !== -1) {
         convertOutlier(idx)
-        let gain = CLICK_BASE + uiState.upgrades.clickYield
+        const upgrades = persisted.current?.upgrades || { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }
+        let gain = CLICK_BASE + (upgrades.clickYield || 0)
         // Data Quality: bring extra outliers if available (bronze=1, silver=2, gold=3)
-        const dq = Math.min(3, Math.max(1, uiState.upgrades.dataQuality || 1))
+        const dq = Math.min(3, Math.max(1, upgrades.dataQuality || 1))
         if (dq > 1) {
           let need = dq - 1
           for (let i = 0; i < points.current.length && need > 0; i++) {
@@ -919,7 +1176,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           }
         }
         // Mini-Batch: +10% per level, collect ALL outliers if >1 present
-        const mbLevel = uiState.upgrades.batchCollect
+        const mbLevel = upgrades.batchCollect || 0
         const chance = clamp(0.1 * mbLevel, 0, 1)
         const totalOutliers = points.current.reduce((n, p) => n + (p.state === 'outlier' ? 1 : 0), 0)
         if (totalOutliers > 1 && Math.random() < chance) {
@@ -939,6 +1196,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     },
     purchase(key) {
       if (!persisted.current) return
+      // Input validation
+      if (!key || typeof key !== 'string') {
+        console.warn('Invalid upgrade key:', key)
+        return
+      }
       if (key === 'dataQuality') {
         const lvl = persisted.current.upgrades.dataQuality ?? 0 // 0 bronze -> 1 silver -> 2 gold
         const costIQ = lvl === 0 ? 10 : 100
@@ -971,7 +1233,60 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       tps *= computeMult
       return { tokensPerSec: tps, coresByLevel: counts }
     },
-  }
+    // Debug functions for testing
+    debug: {
+      addTokens(amount: number) {
+        if (persisted.current) {
+          persisted.current.tokens += amount
+          setUiState(s => ({ ...s, tokens: persisted.current!.tokens }))
+        }
+      },
+      addIQ(amount: number) {
+        if (persisted.current) {
+          persisted.current.iq += amount
+          setUiState(s => ({ ...s, iq: persisted.current!.iq }))
+        }
+      },
+      addCores(levels: number[]) {
+        // Add cores at specified levels [1,2,3,4,5]
+        levels.forEach(level => {
+          const targetLevel = Math.max(1, Math.min(5, level))
+          const newCluster: Cluster = {
+            id: clusters.current.length,
+            x: 50 + Math.random() * Math.max(0, worldW.current - 100),
+            y: 50 + Math.random() * Math.max(0, worldH.current - 100),
+            members: 0,
+            radius: 10,
+            emitTimer: rand(PULSE_MIN, PULSE_MAX),
+            flashT: 0,
+            webIndices: [],
+            level: targetLevel,
+            progress: 0,
+            colorIndex: LEVEL_COLOR_INDEX[targetLevel - 1] || LEVEL_COLOR_INDEX[0],
+          }
+          clusters.current.push(newCluster)
+        })
+      },
+      setUpgradeLevel(upgradeKey: keyof Upgrades, level: number) {
+        if (persisted.current) {
+          const safeLevel = Math.max(0, level)
+          persisted.current.upgrades = { ...persisted.current.upgrades, [upgradeKey]: safeLevel }
+          setUiState(s => ({ ...s, upgrades: persisted.current!.upgrades }))
+        }
+      },
+      setIQUpgradeLevel(upgradeKey: keyof NonNullable<GalaxyState['iqUpgrades']>, level: number) {
+        if (persisted.current) {
+          const safeLevel = Math.max(0, level)
+          if (upgradeKey === 'confettiUnlocked' || upgradeKey === 'paletteUnlocked') {
+            persisted.current.iqUpgrades = { ...persisted.current.iqUpgrades, [upgradeKey]: level > 0 }
+          } else {
+            persisted.current.iqUpgrades = { ...persisted.current.iqUpgrades, [upgradeKey]: safeLevel }
+          }
+          setUiState(s => ({ ...s, iqUpgrades: persisted.current!.iqUpgrades }))
+        }
+      }
+    },
+  }), [])
 
   return { state: uiState, api, parallaxY }
 }

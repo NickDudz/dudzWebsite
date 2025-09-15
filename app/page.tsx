@@ -4,56 +4,24 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import ClusteringGalaxyCanvas from '../components/ClusteringGalaxyCanvas'
 import GalaxyUI from '../components/GalaxyUI'
+import ErrorBoundary from '../components/ErrorBoundary'
+import StarfieldCanvas from '../components/StarfieldCanvas'
+import SettingsDropdown from '../components/SettingsDropdown'
 import { useClusteringGalaxy } from '../hooks/useClusteringGalaxy'
 
-type Star = { id: number; char: string; x: number; y: number; layer: number }
 
 export default function Page() {
   const [starsOn, setStarsOn] = useState(true)
-  const [galaxyOn, setGalaxyOn] = useState(true)
+  const [galaxyOn, setGalaxyOn] = useState(false)
   const [hudCollapsed, setHudCollapsed] = useState(true)
+  const [hudSidebar, setHudSidebar] = useState(false)
   const [panelsOn, setPanelsOn] = useState(true)
-  const [stars, setStars] = useState<Star[]>([])
-  const [fieldSize, setFieldSize] = useState<number>(0)
+  const [gameStarted, setGameStarted] = useState(false)
+  const [showGameIntro, setShowGameIntro] = useState(false)
   const [scrollY, setScrollY] = useState(0)
   const [smoothY, setSmoothY] = useState(0)
   const [showInstr, setShowInstr] = useState(false)
-
-  const lagFactor = 0.1
-  // Much subtler parallax
-  const parallaxFactors = [-0.002, -0.001, 0.0015, 0.002]
-  const globalParallax = 1
-  const speedFactor = 1
-
-  useEffect(() => {
-    if (!starsOn) {
-      setStars([])
-      return
-    }
-
-    const glyphs = ['*', '+', '.']
-
-    const regenerate = () => {
-      const base = Math.max(window.innerWidth, window.innerHeight)
-      // Larger field to ensure coverage during subtle scroll shifts
-      const size = Math.ceil(base * 3.2)
-      setFieldSize(size)
-
-      const count = Math.max(200, Math.floor(size * size * 0.00006))
-      const arr: Star[] = Array.from({ length: count }, (_, i) => ({
-        id: i,
-        char: glyphs[(Math.random() * glyphs.length) | 0],
-        x: Math.random() * size,
-        y: Math.random() * size,
-        layer: i % 4,
-      }))
-      setStars(arr)
-    }
-
-    regenerate()
-    window.addEventListener('resize', regenerate)
-    return () => window.removeEventListener('resize', regenerate)
-  }, [starsOn])
+  const lagFactor = 0.05 // Smoother interpolation for parallax
 
   useEffect(() => {
     const onScroll = () => setScrollY(window.scrollY || 0)
@@ -62,34 +30,53 @@ export default function Page() {
   }, [])
 
   // Galaxy state hook (single RAF loop internally)
-  const galaxy = useClusteringGalaxy({ enabled: galaxyOn })
+  const galaxy = useClusteringGalaxy({ 
+    enabled: galaxyOn, 
+    orbitalMode: true // Enable circular orbit with slight wavy path
+  })
 
-  // Listen for galaxy events (auto fullscreen when first core maxed)
+  // Auto-start game (disable tutorial/intro)
   useEffect(() => {
-    const onFx = (e: any) => {
-      const name = e?.detail?.name
-      if (name === 'first-max') {
-        setShowInstr(true)
-        setPanelsOn(false)
-      }
-    }
+    setGameStarted(true)
+    setGalaxyOn(true)
+    setHudCollapsed(false)
+    setShowGameIntro(false)
+    setShowInstr(false)
+  }, [])
+
+  // Disable tutorial-related event responses
+  useEffect(() => {
+    const onFx = () => {}
     window.addEventListener('galaxy-effect' as any, onFx as any)
     return () => window.removeEventListener('galaxy-effect' as any, onFx as any)
   }, [])
 
+  // Throttle star parallax to target FPS (default 30)
   useEffect(() => {
     let raf = 0
-    const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+    let last = performance.now()
+    let targetMs = 1000 / (galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30)
+    const onVis = () => { /* update target on visibility resume */ targetMs = 1000 / (galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30) }
+    document.addEventListener('visibilitychange', onVis)
+    const smoothLerp = (a: number, b: number, t: number) => {
+      const diff = b - a
+      const easedT = 1 - Math.pow(1 - t, 3)
+      return a + diff * easedT
+    }
     const tick = () => {
-      setSmoothY(prev => {
-        const next = lerp(prev, scrollY, lagFactor)
-        return Math.abs(next - scrollY) < 0.1 ? scrollY : next
-      })
+      const now = performance.now()
+      if (now - last >= targetMs) {
+        last = now
+        setSmoothY(prev => {
+          const next = smoothLerp(prev, scrollY, lagFactor)
+          return Math.abs(next - scrollY) < 0.01 ? scrollY : next
+        })
+      }
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [scrollY, lagFactor])
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis) }
+  }, [scrollY, lagFactor, galaxy.api])
 
   const projects = useMemo(
     () => [
@@ -105,61 +92,27 @@ export default function Page() {
 
   return (
     <main className="relative min-h-screen bg-[#07090c] text-zinc-200 font-mono overflow-hidden">
+      {/* Canvas starfield (performant, pointer-events: none) */}
       {starsOn && (
-        <div className="pointer-events-none fixed inset-0 z-0">
-          <div
-            className="absolute left-1/2 top-1/2"
-            style={{ width: fieldSize, height: fieldSize, transform: 'translate(-50%, -50%)', transformOrigin: '50% 50%' }}
-          >
-            {parallaxFactors.map((factor, idx) => (
-              <div key={idx} className="absolute inset-0 will-change-transform" style={{ transform: `translate3d(0, ${smoothY * factor * globalParallax}px, 0)` }}>
-                <div className="absolute inset-0 animate-[swirl_linear_infinite]" style={{ animationDuration: `${(140 + idx * 30) / speedFactor}s` }}>
-                  {stars.filter(s => s.layer === idx).map(s => (
-                    <span
-                      key={`l${idx}-${s.id}`}
-                      style={{
-                        position: 'absolute',
-                        left: s.x,
-                        top: s.y,
-                        fontSize: `${12 - idx}px`,
-                        color:
-                          idx === 0
-                            ? 'rgba(147,197,253,0.85)'
-                            : idx === 1
-                            ? 'rgba(167,139,250,0.80)'
-                            : idx === 2
-                            ? 'rgba(129,140,248,0.78)'
-                            : 'rgba(59,130,246,0.70)',
-                        textShadow: '0 0 6px rgba(59,130,246,0.55)',
-                        userSelect: 'none',
-                      }}
-                    >
-                      {s.char}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[60vmin] w-[60vmin] rounded-full bg-[radial-gradient(closest-side,rgba(2,6,23,0.55),rgba(2,6,23,0))] animate-[pulseScale_12s_ease-in-out_infinite]" />
-          </div>
-          <style>{`
-            @keyframes swirl { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-            @keyframes pulseScale { 0%, 100% { transform: scale(1.00); } 50% { transform: scale(1.03); } }
-          `}</style>
-        </div>
+        <StarfieldCanvas
+          enabled={starsOn}
+          parallaxY={smoothY}
+          getTargetFps={galaxy.api?.getTargetFps}
+          lowQuality={galaxy.api?.getPerformanceMode?.() ?? false}
+        />
       )}
 
-      {/* Galaxy background canvas (above swirl, below content) */}
+      {/* Galaxy game canvas (interactive layer above starfield) */}
       {galaxyOn && (
-        <div className="fixed inset-0 z-0">
-          <ClusteringGalaxyCanvas enabled={galaxyOn} parallaxY={smoothY} api={galaxy.api} />
+        <div className="fixed inset-0 z-[10]">
+          <ErrorBoundary>
+            <ClusteringGalaxyCanvas enabled={galaxyOn} parallaxY={smoothY} api={galaxy.api} />
+          </ErrorBoundary>
         </div>
       )}
 
-      <div className="relative z-10 mx-auto max-w-6xl px-4 pb-20 pt-6 sm:px-6 lg:px-8">
-        <div className="mb-4 flex items-center justify-between gap-4">
+      <div className="relative z-[20] mx-auto max-w-6xl px-4 pb-20 pt-6 sm:px-6 lg:px-8">
+        <div className={`mb-4 flex items-center justify-between gap-4 ${hudSidebar ? 'pr-[0px] sm:pr-[24rem]' : ''}`}>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
               <a
@@ -188,21 +141,31 @@ export default function Page() {
               </a>
             </div>
           </div>
-          <div className="flex flex-col items-stretch gap-1">
-            <button onClick={() => setStarsOn(v => !v)} className="group inline-flex items-center justify-center gap-2 rounded-md border border-zinc-700/70 bg-zinc-900/60 px-2 py-1 text-[10px] text-zinc-300 backdrop-blur transition hover:border-zinc-600 hover:text-zinc-100">
-              Stars: {starsOn ? 'On' : 'Off'}
-            </button>
-            <button onClick={() => setPanelsOn(v => !v)} className="group inline-flex items-center justify-center gap-2 rounded-md border border-zinc-700/70 bg-zinc-900/60 px-2 py-1 text-[10px] text-zinc-300 backdrop-blur transition hover:border-zinc-600 hover:text-zinc-100">
-              Panels: {panelsOn ? 'On' : 'Off'}
-            </button>
-            <button onClick={() => setGalaxyOn(v => !v)} className="group inline-flex items-center justify-center gap-2 rounded-md border border-blue-500/50 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-200 backdrop-blur transition hover:border-blue-400 hover:text-blue-100">
-              Clicker Game: {galaxyOn ? 'On' : 'Off'}
-            </button>
-          </div>
+          <SettingsDropdown
+            starsOn={starsOn}
+            onStarsToggle={() => setStarsOn(v => !v)}
+            panelsOn={panelsOn}
+            onPanelsToggle={() => setPanelsOn(v => !v)}
+            galaxyOn={galaxyOn}
+            onGalaxyToggle={() => setGalaxyOn(v => !v)}
+            targetFps={galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30}
+            onTargetFpsChange={(fps) => galaxy.api?.setTargetFps?.(fps)}
+            performanceMode={galaxy.api?.getPerformanceMode ? galaxy.api.getPerformanceMode() : false}
+            onPerformanceModeToggle={() => galaxy.api?.setPerformanceMode?.(!galaxy.api?.getPerformanceMode?.())}
+          />
         </div>
 
-        {/* HUD bottom-center; collapsible */}
-        <GalaxyUI state={galaxy.state} api={galaxy.api} onToggle={() => setGalaxyOn(v => !v)} enabled={galaxyOn} collapsed={hudCollapsed} onCollapsedChange={setHudCollapsed} />
+        {/* HUD right side; collapsible */}
+        <GalaxyUI 
+          state={galaxy.state} 
+          api={galaxy.api} 
+          onToggle={() => setGalaxyOn(v => !v)} 
+          enabled={galaxyOn} 
+          collapsed={hudCollapsed} 
+          onCollapsedChange={setHudCollapsed}
+          sidebar={hudSidebar}
+          onSidebarToggle={() => setHudSidebar(v => !v)}
+        />
 
         {panelsOn && (
           <>
@@ -220,18 +183,7 @@ export default function Page() {
         )}
       </div>
 
-      {/* Instructions overlay when entering fullscreen play */}
-      {!panelsOn && showInstr && (
-        <div className="pointer-events-none fixed inset-0 z-20 flex items-center justify-center">
-          <div className="pointer-events-auto rounded-md border border-zinc-700/70 bg-zinc-900/80 px-4 py-3 text-xs text-zinc-200 shadow-lg">
-            <div className="font-semibold mb-1">Galaxy Play Mode</div>
-            <div className="text-zinc-300/90">Click glowing pages to feed nearby cores. Level cores to 5 to split and earn IQ. Use the HUD for upgrades.</div>
-            <div className="mt-2 text-right">
-              <button onClick={() => setShowInstr(false)} className="rounded-sm border border-zinc-700/70 bg-zinc-800/60 px-2 py-1">Got it</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Tutorial disabled */}
     </main>
   )
 }
@@ -247,6 +199,7 @@ function ProjectCard({ title, tagline, img, index }: { title: string; tagline: s
       whileHover={{ rotate: -2, scale: 1.01 }}
       viewport={{ once: true, margin: '-80px' }}
       transition={{ duration: 0.45, ease: 'easeOut' }}
+
       className="group relative overflow-hidden border border-zinc-800/70 bg-zinc-900/40 p-2 ring-1 ring-blue-500/40 transition duration-300 hover:ring-blue-400/70 hover:shadow-[0_0_30px_rgba(59,130,246,0.25)]"
     >
       <div className="relative overflow-hidden">
