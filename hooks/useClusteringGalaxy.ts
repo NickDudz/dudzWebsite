@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { GAME_CONFIG } from "../constants/gameConstants"
 
 // Public types and API
 /**
@@ -81,12 +82,15 @@ export type GalaxyAPI = {
   setPerformanceMode: (lowQuality: boolean) => void
   getPerformanceMode: () => boolean
   getCurrentFps: () => number
+  setExtremeMode: (v: boolean) => void
+  getExtremeMode: () => boolean
   debug: {
     addTokens: (amount: number) => void
     addIQ: (amount: number) => void
     addCores: (levels: number[]) => void
     setUpgradeLevel: (upgradeKey: keyof Upgrades, level: number) => void
     setIQUpgradeLevel: (upgradeKey: keyof NonNullable<GalaxyState['iqUpgrades']>, level: number) => void
+    setExtremeMode?: (v: boolean) => void
   }
 }
 
@@ -98,26 +102,34 @@ export type UseClusteringGalaxyOptions = {
 export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const enabled = opts.enabled ?? true
   const orbitalMode = opts.orbitalMode ?? false
+  const enabledRef = useRef(enabled)
+  useEffect(() => { enabledRef.current = enabled }, [enabled])
 
   // Constants (initial balancing in BALANCING.md)
-  const PASSIVE_BASE = 1
-  const CLICK_BASE = 3
-  const BASE_SPAWN = 6.0 // seconds base; slower because items drift across
-  const OUTLIER_MAX_BASE = 1
-  const OUTLIER_MAX_PER_LEVEL = 1 // allows +1 every couple levels via cap formula
-  const PULSE_MIN = 5.0
-  const PULSE_MAX = 9.0
-  const GLOW_MS = 200
-  const AMBIENT_COUNT = 520 // More ambient pages to cover large screens
-  const CLICK_RADIUS = 48 // Increased for better click detection
-  const WRAP_PAD = 8
-  const MAX_DT = 0.05 // seconds cap
-  const SPAWN_MARGIN = 28
-  const TOP_EXCLUDE = 60
-  const EDGE_SPAWN_PAD = 24
-  const MAX_CORES = 1024 // Maximum total cores (including stacked)
-  const STACK_THRESHOLD = 10 // Start stacking identical cores after this many
-  const L5_STACK_THRESHOLD = 25 // Higher threshold for L5 cores
+  const {
+    PASSIVE_BASE,
+    CLICK_BASE,
+    BASE_SPAWN,
+    OUTLIER_MAX_BASE,
+    OUTLIER_MAX_PER_LEVEL,
+    PULSE_MIN,
+    PULSE_MAX,
+    GLOW_MS,
+    AMBIENT_COUNT,
+    CLICK_RADIUS,
+    WRAP_PAD,
+    MAX_DT,
+    SPAWN_MARGIN,
+    TOP_EXCLUDE,
+    EDGE_SPAWN_PAD,
+    MAX_CORES,
+    STACK_THRESHOLD,
+    L5_STACK_THRESHOLD,
+    STACK_THRESHOLDS,
+    STACK_THRESHOLDS_HIGH,
+    DRAW_BUFFER_EXTRA,
+    ORBIT_LIMIT_BASE,
+  } = GAME_CONFIG
 
   const COLORS = useMemo(() => [
     // 0..n color slots; keep alpha separate in draw record
@@ -127,13 +139,14 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     "#818cf8", // indigo
     "#60a5fa", // blue
     "#e5e7eb", // neutral light for outliers
-    "#3b82f6", // royal blue (level 2)
-    "#065f46", // dark green (level 3)
-    "#10b981", // bright green (level 4)
-    "#22ff88", // neon green (level 5)
+    "#3b82f6", // blue (level 1) - matches GalaxyUI gradient
+    "#6366f1", // indigo (level 2) - matches GalaxyUI gradient
+    "#8b5cf6", // violet (level 3) - matches GalaxyUI gradient
+    "#a855f7", // purple (level 4) - matches GalaxyUI gradient
+    "#c084fc", // light purple (level 5) - matches GalaxyUI gradient
   ], [])
-  const LEVEL_COLOR_INDEX = [0, 5, 6, 7, 8] // indices into COLORS for levels 1..5
-  const LEVEL_RATE = [1, 2, 4, 6, 8] // tokens/sec for levels 1..5
+  const LEVEL_COLOR_INDEX = GAME_CONFIG.LEVEL_COLOR_INDEX
+  const LEVEL_RATE = GAME_CONFIG.LEVEL_RATE
 
   // Persisted bits
   type Persisted = { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }; lastSeen: number; totalEverCollected: number }
@@ -144,6 +157,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 },
     iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
   }))
+  const [targetFpsState, setTargetFpsState] = useState(30)
+  const [performanceModeState, setPerformanceModeState] = useState(false)
 
   // Simulation model
   const points = useRef<Point[]>([])
@@ -154,6 +169,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const autoAcc = useRef<number>(0)
   const firstL2Notified = useRef<boolean>(false)
   const firstMaxNotified = useRef<boolean>(false)
+  // Round-robin tracker for stacking target per level to distribute stacks
+  const stackRoundRobin = useRef<Record<number, number>>({})
   
   // Orbital movement
   const orbitalAngles = useRef<number[]>([])
@@ -166,10 +183,15 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
   // Star rotation sync for lightweight floating data rotation
   const starRotationTime = useRef<number>(0)
+  // Track the peak total number of cores ever reached (sum of stack counts)
+  const maxTotalCores = useRef<number>(0)
 
   // Draw snapshot (stable reference)
   const snapshot = useRef<DrawSnapshot>({ width: 0, height: 0, parallaxY: 0, points: [] })
-  const drawBuffer: DrawRecord[] = useRef<DrawRecord[]>(new Array(AMBIENT_COUNT + 64).fill(0).map(() => ({ x: 0, y: 0, radius: 0, alpha: 0, color: 0, shape: 'icon', variant: 0, glow: 0 }))).current
+  // Size draw buffer to support the largest mode (extreme) so we don't reallocate on mode changes
+  const MAX_CORE_RESERVE = Math.max(GAME_CONFIG.CORE_RESERVE_CAP_LOW, GAME_CONFIG.CORE_RESERVE_CAP_HIGH, GAME_CONFIG.CORE_RESERVE_CAP_EXTREME)
+  const BUFFER_SIZE = AMBIENT_COUNT + MAX_CORE_RESERVE + GAME_CONFIG.OUTLIER_RESERVE + GAME_CONFIG.DRAW_BUFFER_EXTRA
+  const drawBuffer: DrawRecord[] = useRef<DrawRecord[]>(new Array(BUFFER_SIZE).fill(0).map(() => ({ x: 0, y: 0, radius: 0, alpha: 0, color: 0, shape: 'icon', variant: 0, glow: 0 }))).current
 
   // Registered canvases
   const canvases = useRef<Set<HTMLCanvasElement>>(new Set())
@@ -179,12 +201,30 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   useEffect(() => { uiStateRef.current = uiState }, [uiState])
 
   // Performance controls
-  const targetFps = useRef<number>(30)
+  const targetFps = useRef<number>(targetFpsState)
   const frameBudgetMs = useRef<number>(1000 / targetFps.current)
   const lastFrameMs = useRef<number>(performance.now())
   const currentFps = useRef<number>(30)
-  const lowQualityMode = useRef<boolean>(false)
+  const lowQualityMode = useRef<boolean>(performanceModeState)
   const pageVisible = useRef<boolean>(true)
+  // Extreme mode (debug): raise caps and optionally disable stacking
+  const [extremeModeState, setExtremeModeState] = useState<boolean>(false)
+  const extremeMode = useRef<boolean>(false)
+  useEffect(() => { extremeMode.current = extremeModeState }, [extremeModeState])
+
+  // Enforce stacking thresholds when quality mode changes (e.g., from Extreme -> Low/High)
+  useEffect(() => {
+    lowQualityMode.current = performanceModeState
+    if (!extremeModeState) {
+      try { enforceStackingThresholds() } catch {}
+    }
+  }, [performanceModeState])
+
+  useEffect(() => {
+    if (!extremeModeState) {
+      try { enforceStackingThresholds() } catch {}
+    }
+  }, [extremeModeState])
 
   // Fixed timestep simulation - separate from render FPS
   const SIMULATION_FPS = 30 // Fixed simulation rate
@@ -295,7 +335,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const stackFactor = (core.stackCount || 1) > 1 ? 0.05 : 0 // Stacked cores slightly further out
       const randomVariation = (Math.random() - 0.5) * 0.1 // Small random variation (±5%)
 
-      const radiusMultiplier = 0.85 + levelFactor + stackFactor + randomVariation
+      const radiusMultiplier = 0.95 + levelFactor + stackFactor + randomVariation
       const individualRadius = baseRadius * radiusMultiplier
       orbitalRadii.current.push(individualRadius)
     }
@@ -335,7 +375,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         const levelFactor = (core.level - 1) * 0.08
         const stackFactor = (core.stackCount || 1) > 1 ? 0.05 : 0
         const randomVariation = (Math.random() - 0.5) * 0.1
-        const radiusMultiplier = 0.85 + levelFactor + stackFactor + randomVariation
+        const radiusMultiplier = 0.95 + levelFactor + stackFactor + randomVariation
         orbitalRadii.current.push(baseRadius * radiusMultiplier)
       }
       if (i >= bouncePeriods.current.length) {
@@ -362,7 +402,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         const levelFactor = (cluster.level - 1) * 0.08
         const stackFactor = (cluster.stackCount || 1) > 1 ? 0.05 : 0
         const randomVariation = (Math.random() - 0.5) * 0.1
-        const radiusMultiplier = 0.85 + levelFactor + stackFactor + randomVariation
+        const radiusMultiplier = 0.95 + levelFactor + stackFactor + randomVariation
         coreRadius = baseRadius * radiusMultiplier
         orbitalRadii.current[i] = coreRadius
       }
@@ -702,6 +742,42 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           p.x += Math.cos(rotationAngle) * rotationRadius * dt
           p.y += Math.sin(rotationAngle) * rotationRadius * dt
         }
+
+        // Black hole swirl for ambient points based on peak total core count (clockwise)
+        // Coverage: gradually increase the fraction of ambient points affected from 0 at 10 cores
+        // to 100% at 200 peak cores. Speed still ramps from 10 -> 1010 and remains 10x slower overall.
+        if (p.state === "ambient" && !reducedMotion.current) {
+          const peak = maxTotalCores.current
+          // Fraction of ambient affected by swirl: 0 -> 200 cores maps to 0 -> 1
+          const coverage = Math.max(0, Math.min(1, peak / 200))
+          // Speed ramp based on peak: 0 -> 1010 cores maps to 0 -> 1
+          const s = Math.max(0, Math.min(1, peak / 1010))
+          if (coverage > 0 && s > 0) {
+            // Deterministic eligibility per point using rotationOffset (or id fallback)
+            const twoPi = Math.PI * 2
+            const seed = (p.rotationOffset !== undefined)
+              ? Math.max(0, Math.min(1, (p.rotationOffset % twoPi) / twoPi))
+              : ((p.id & 1023) / 1023)
+            if (seed <= coverage) {
+              const cx = worldW.current * 0.5
+              const cy = worldH.current * 0.5
+              const dx = p.x - cx
+              const dy = p.y - cy
+              const r = Math.sqrt(dx*dx + dy*dy) + 1e-3
+              // Tangent vector for clockwise rotation in screen space
+              const tx = -dy / r
+              const ty =  dx / r
+              // Angular speed: ramp to 125% of nominal core orbit speed
+              const baseAngular = 0.6 // rad/sec nominal
+              const maxAngular = baseAngular * 1.25
+              const ang = baseAngular + (maxAngular - baseAngular) * s
+              // Make ambient swirl 10x slower for a calmer effect
+              const tangentialSpeed = ang * r * 0.1 // px/sec
+              p.x += tx * tangentialSpeed * dt
+              p.y += ty * tangentialSpeed * dt
+            }
+          }
+        }
       }
       if (p.state === "ambient" || p.state === "clustered") {
         // clustered moves with rigid orbit around moving core
@@ -972,18 +1048,134 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   }
 
   function tryStackCore(level: number): boolean {
-    const threshold = level === 5 ? L5_STACK_THRESHOLD : STACK_THRESHOLD
+    // Disable stacking only in Extreme mode; otherwise use thresholds
+    if (extremeMode.current) return false
+    const arr = (lowQualityMode.current ? STACK_THRESHOLDS : STACK_THRESHOLDS_HIGH) || STACK_THRESHOLDS
+    const perLevel = (arr && arr[Math.max(0, Math.min(4, level - 1))]) || undefined
+    const threshold = perLevel ?? (level === 5 ? L5_STACK_THRESHOLD : STACK_THRESHOLD)
     const sameLevelCores = clusters.current.filter(c => c.level === level && c.isVisible !== false)
-
     if (sameLevelCores.length >= threshold) {
-      // Find a core to stack onto
-      const stackTarget = sameLevelCores.find(c => (c.stackCount || 1) < 100) // Max 100 per stack
-      if (stackTarget) {
-        stackTarget.stackCount = (stackTarget.stackCount || 1) + 1
-        return true // Successfully stacked
+      // Prefer cores that don't have a stack yet (stackCount===1)
+      const eligibleNoStack = sameLevelCores.filter(c => (c.stackCount || 1) === 1)
+      const levelKey = level | 0
+      if (eligibleNoStack.length > 0) {
+        const idx = (stackRoundRobin.current[levelKey] || 0) % eligibleNoStack.length
+        const target = eligibleNoStack[idx]
+        target.stackCount = (target.stackCount || 1) + 1
+        stackRoundRobin.current[levelKey] = (stackRoundRobin.current[levelKey] || 0) + 1
+        return true
+      }
+      // Otherwise pick among the least-stacked cores (<100), round-robin ties
+      const eligible = sameLevelCores.filter(c => (c.stackCount || 1) < 100)
+      if (eligible.length > 0) {
+        const minStack = eligible.reduce((m, c) => Math.min(m, c.stackCount || 1), Infinity)
+        const least = eligible.filter(c => (c.stackCount || 1) === minStack)
+        const idx = (stackRoundRobin.current[levelKey] || 0) % least.length
+        const target = least[idx]
+        target.stackCount = (target.stackCount || 1) + 1
+        stackRoundRobin.current[levelKey] = (stackRoundRobin.current[levelKey] || 0) + 1
+        return true
       }
     }
-    return false // Couldn't stack
+    return false
+  }
+
+  // Consolidate visible cores into stacks based on active thresholds
+  function enforceStackingThresholds() {
+    const arrThresholds = (lowQualityMode.current ? STACK_THRESHOLDS : STACK_THRESHOLDS_HIGH) || STACK_THRESHOLDS
+    if (!arrThresholds || arrThresholds.length < 5) return
+
+    const centerX = worldW.current * 0.5
+    const centerY = worldH.current * 0.5
+    const baseR = orbitalRadius.current || Math.min(worldW.current, worldH.current) * 0.3
+
+    // For each level, compute total stacks and redistribute evenly across threshold count
+    for (let level = 1; level <= 5; level++) {
+      // Gather all cores of this level
+      const indices: number[] = []
+      let totalStacks = 0
+      for (let i = 0; i < clusters.current.length; i++) {
+        const c = clusters.current[i]
+        if (c.level === level) {
+          indices.push(i)
+          totalStacks += (c.stackCount || 1)
+        }
+      }
+      if (indices.length === 0 || totalStacks === 0) continue
+
+      const threshold = arrThresholds[Math.max(0, Math.min(4, level - 1))] || Infinity
+      const visibleCount = Math.min(threshold, totalStacks) || 1
+
+      // Ensure we have at least visibleCount cores to show: use first N indices as targets
+      const targets = indices.slice(0, Math.min(visibleCount, indices.length))
+      // If not enough existing, reuse last target multiple times (rare path)
+      while (targets.length < visibleCount) targets.push(indices[indices.length - 1])
+
+      // Distribute stackCounts evenly among targets
+      const baseEach = Math.floor(totalStacks / visibleCount)
+      let remainder = totalStacks - baseEach * visibleCount
+
+      // Compute even placement on ring for this level
+      const levelFactor = (level - 1) * 0.08
+      const radius = baseR * (0.95 + levelFactor)
+
+      for (let t = 0; t < targets.length; t++) {
+        const id = targets[t]
+        const c = clusters.current[id]
+        c.isVisible = true
+        c.stackCount = baseEach + (remainder > 0 ? 1 : 0)
+        if (remainder > 0) remainder--
+        // Even angle placement
+        const angle = (Math.PI * 2 * t) / visibleCount
+        c.x = centerX + Math.cos(angle) * radius
+        c.y = centerY + Math.sin(angle) * radius
+      }
+
+      // Hide all non-target cores of this level and zero their stacks
+      const targetSet = new Set(targets)
+      for (let i = 0; i < indices.length; i++) {
+        const id = indices[i]
+        if (!targetSet.has(id)) {
+          const c = clusters.current[id]
+          c.isVisible = false
+          c.members = 0
+          c.stackCount = 0
+        }
+      }
+
+      // Reassign clustered pages to nearest target core of same level
+      for (let pidx = 0; pidx < points.current.length; pidx++) {
+        const p = points.current[pidx]
+        if (p.state === 'clustered' && p.clusterId != null) {
+          const cur = clusters.current[p.clusterId]
+          if (!cur || cur.level !== level || cur.isVisible === false) {
+            // find nearest target
+            let bestId: number | null = null
+            let bestD = Infinity
+            for (let t = 0; t < targets.length; t++) {
+              const id = targets[t]
+              const c = clusters.current[id]
+              const dx = c.x - p.x
+              const dy = c.y - p.y
+              const d = dx * dx + dy * dy
+              if (d < bestD) { bestD = d; bestId = id }
+            }
+            if (bestId != null) p.clusterId = bestId
+          }
+        }
+      }
+    }
+
+    // Recompute members based on reassigned points
+    for (let i = 0; i < clusters.current.length; i++) clusters.current[i].members = 0
+    for (let pidx = 0; pidx < points.current.length; pidx++) {
+      const p = points.current[pidx]
+      if (p.state === 'clustered' && p.clusterId != null) {
+        const cid = p.clusterId
+        const c = clusters.current[cid]
+        if (c && c.isVisible !== false) c.members += 1
+      }
+    }
   }
 
   function splitCore(cIdx: number) {
@@ -1052,11 +1244,15 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     snapshot.current.width = W
     snapshot.current.height = H
     snapshot.current.parallaxY = 0
+    // Update max core total based on current clusters (counts stacked cores)
+    const curTotalCores = clusters.current.reduce((total, c) => total + (c.stackCount || 1), 0)
+    if (curTotalCores > maxTotalCores.current) maxTotalCores.current = curTotalCores
     let n = 0
 
     // Smart buffer management: Reserve space for critical elements
     const visibleCoreCount = clusters.current.filter(c => c.isVisible !== false).length
-    const reservedForCores = Math.min(visibleCoreCount * 2, 200) // 2 draws per core (halo + dot)
+    const coreReserveCap = extremeMode.current ? GAME_CONFIG.CORE_RESERVE_CAP_EXTREME : (lowQualityMode.current ? GAME_CONFIG.CORE_RESERVE_CAP_LOW : GAME_CONFIG.CORE_RESERVE_CAP_HIGH)
+    const reservedForCores = Math.min(visibleCoreCount * 2, coreReserveCap) // 2 draws per core (halo + dot)
     const reservedForOutliers = 30 // Always reserve space for flying data
     const availableForData = Math.max(50, drawBuffer.length - reservedForCores - reservedForOutliers - 10)
 
@@ -1080,9 +1276,24 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       }
     }
 
-    // 2. PRIORITY: Background ambient data (ensure we always have some visible)
+    // 2. PRIORITY: Background ambient data (throttled as core total grows)
     let ambientCount = 0
-    const maxAmbient = Math.max(80, Math.floor(availableForData * 0.6)) // Always keep at least 80 ambient points
+    // Use the peak core total reached to determine ambient quota
+    // New ramp: from 0->200 peak cores, drop to 20% linearly. From 200->1010, ease-out from 20% to 0.
+    const peakAmbient = maxTotalCores.current
+    let ambientFactor = 1
+    if (peakAmbient <= 0) {
+      ambientFactor = 1
+    } else if (peakAmbient < 200) {
+      ambientFactor = 1 - 0.8 * (peakAmbient / 200)
+    } else if (peakAmbient < 1010) {
+      const t = (peakAmbient - 200) / (1010 - 200)
+      const easeOut = 1 - Math.pow(1 - t, 2) // quadratic ease-out
+      ambientFactor = 0.2 * (1 - easeOut)
+    } else {
+      ambientFactor = 0
+    }
+    const maxAmbient = Math.max(0, Math.floor(availableForData * 0.6 * ambientFactor))
     for (let i = 0; i < points.current.length && ambientCount < maxAmbient; i++) {
       const p = points.current[i]
       if (p.state === "ambient") {
@@ -1108,7 +1319,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     }
 
     // 3. PRIORITY: Orbiting data (limit per core to prevent buffer overflow)
-    const maxOrbitingPerCore = Math.max(2, Math.floor(8 - visibleCoreCount / 15)) // Reduce as cores increase
+    const baseOrbitMax = extremeMode.current ? 8 : (lowQualityMode.current ? 8 : 12)
+    const decay = extremeMode.current ? 40 : (lowQualityMode.current ? 15 : 25)
+    const minOrbit = extremeMode.current ? 1 : 2
+    const maxOrbitingPerCore = Math.max(minOrbit, Math.floor(baseOrbitMax - visibleCoreCount / decay)) // Reduce as cores increase, higher in high-quality
     const clusteredByCore = new Map<number, number>()
 
     for (let i = 0; i < points.current.length; i++) {
@@ -1140,11 +1354,13 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     }
 
     // 4. PRIORITY: Always render cores (most critical for gameplay!)
+    let coreBaseRecordsDrawn = 0 // count only halo+dot pairs against reserved core budget
     for (let i = 0; i < clusters.current.length; i++) {
       const c = clusters.current[i]
       if (c.isVisible === false) continue // Skip stacked/hidden cores
 
-      // Always ensure space for cores - they're the most important!
+      // Respect reserved core budget in addition to raw buffer size
+      if (coreBaseRecordsDrawn + 2 > reservedForCores) break
       if (n >= drawBuffer.length - 2) break
 
       const halo = drawBuffer[n++]
@@ -1152,8 +1368,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       halo.y = c.y
       const prog = Math.max(0, Math.min(10, c.progress)) / 10
       const scaleMultiplier = c.scaleMultiplier || 1.0
-      halo.radius = (16 + c.level * 4 + Math.min(12, c.members * 0.2) + (c.flashT > 0 ? 5 : 0)) * scaleMultiplier
-      halo.alpha = 0.12 + 0.25 * prog
+      // Slightly enlarge halo when core is stacked to hint at multiplicity
+      const stackBoost = (c.stackCount && c.stackCount > 1) ? 1.12 : 1.0
+      halo.radius = (16 + c.level * 4 + Math.min(12, c.members * 0.2) + (c.flashT > 0 ? 5 : 0)) * scaleMultiplier * stackBoost
+      halo.alpha = (0.02 + 0.04 * prog) * (1 + c.level * 0.3) // Brighter for higher levels
       halo.color = c.colorIndex
       halo.shape = 'halo'
 
@@ -1164,8 +1382,63 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       dot.alpha = 0.98
       dot.color = c.colorIndex
       dot.shape = 'core'
-      dot.variant = i & 3
+      // Use variant to carry the core level (1..5) for drawing the database cylinder stacks
+      dot.variant = Math.max(1, Math.min(5, c.level))
       dot.glow = prog + (scaleMultiplier - 1.0) * 0.5 // Extra glow during animation
+
+      // Count base pair against core budget
+      coreBaseRecordsDrawn += 2
+
+      // Visualize stacked cores with multiple small offset dots arranged in up to 3 rings
+      const extraStacks = Math.max(0, (c.stackCount || 1) - 1)
+      if (extraStacks > 0) {
+        // Cap the number of visual dots to avoid buffer pressure
+        const maxVisualDots = 12
+        const toDraw = Math.min(extraStacks, maxVisualDots)
+        const ring1Cap = 4
+        const ring2Cap = 8
+        const ring3Cap = maxVisualDots
+        let remaining = toDraw
+
+        const baseRadius = dot.radius
+        const ringDefs: { count: number; r: number; alpha: number }[] = []
+        if (remaining > 0) {
+          const c1 = Math.min(remaining, ring1Cap)
+          ringDefs.push({ count: c1, r: baseRadius * 1.2, alpha: 0.85 })
+          remaining -= c1
+        }
+        if (remaining > 0) {
+          const c2 = Math.min(remaining, ring2Cap - ring1Cap)
+          ringDefs.push({ count: c2, r: baseRadius * 1.7, alpha: 0.8 })
+          remaining -= c2
+        }
+        if (remaining > 0) {
+          const c3 = Math.min(remaining, ring3Cap - ring2Cap)
+          ringDefs.push({ count: c3, r: baseRadius * 2.2, alpha: 0.75 })
+          remaining -= c3
+        }
+
+        let angleSeed = (i * 0.8) % (Math.PI * 2)
+        for (const ring of ringDefs) {
+          const step = (Math.PI * 2) / Math.max(1, ring.count)
+          for (let k = 0; k < ring.count; k++) {
+            if (n >= drawBuffer.length - 2) break
+            const a = angleSeed + k * step
+            const dx = Math.cos(a) * ring.r
+            const dy = Math.sin(a) * ring.r
+            const d = drawBuffer[n++]
+            d.x = c.x + dx
+            d.y = c.y + dy
+            d.radius = baseRadius * 0.8
+            d.alpha = ring.alpha
+            d.color = c.colorIndex
+            d.shape = 'core'
+            d.variant = (i + k + 1) & 3
+            d.glow = dot.glow
+          }
+          angleSeed += 0.42 // small rotation between rings
+        }
+      }
     }
 
     snapshot.current.points.length = n
@@ -1205,21 +1478,25 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         ctx.globalCompositeOperation = 'source-over'
 
         // Web connections: faint lines from centroid to a few members (skip in low quality)
-        if (!lowQualityMode.current) {
+        if (!lowQualityMode.current || extremeMode.current) {
           ctx.save()
           ctx.lineWidth = 1
           ctx.globalAlpha = 0.08
           for (let i = 0; i < clusters.current.length; i++) {
             const c = clusters.current[i]
+            if (c.isVisible === false) continue
             ctx.strokeStyle = COLORS[c.colorIndex] || COLORS[0]
             const web = c.webIndices
-            for (let k = 0; k < web.length; k++) {
+            const maxLines = extremeMode.current ? 4 : (lowQualityMode.current ? GAME_CONFIG.WEB_MAX_LINES_LOW : GAME_CONFIG.WEB_MAX_LINES_HIGH)
+            let drawn = 0
+            for (let k = 0; k < web.length && drawn < maxLines; k++) {
               const p = points.current[web[k]]
-              if (!p || p.state !== "clustered") continue
+              if (!p || p.state !== "clustered" || p.clusterId !== i) continue
               ctx.beginPath()
               ctx.moveTo(c.x, c.y)
               ctx.lineTo(p.x, p.y)
               ctx.stroke()
+              drawn++
             }
           }
           ctx.restore()
@@ -1229,64 +1506,149 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           const r = snap.points[i]
           const color = COLORS[r.color] || COLORS[0]
           if (r.shape === 'halo') {
+            // Create radial gradient for proper glowing halo effect
+            const gradient = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, r.radius)
+            gradient.addColorStop(0, color) // Full color at center
+            gradient.addColorStop(0.3, color) // Full color for inner 30%
+            gradient.addColorStop(1, color + '00') // Fully transparent at edge
+
             ctx.globalAlpha = r.alpha
-            ctx.fillStyle = color
+            ctx.fillStyle = gradient
             ctx.beginPath()
             ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2)
             ctx.fill()
             continue
           }
           if (r.shape === 'core') {
-            // CPU core glow based on progress carried in r.glow (0..1)
+            // Database cylinder icon with 1..5 segments based on variant (core level)
+            // Simplified lines with curved separators; cylinder height grows with level.
             const glowFrac = Math.max(0, Math.min(1, r.glow || 0))
-            const size = r.radius * 2.4
-            const gx = r.x - size / 2
-            const gy = r.y - size / 2
+            const segments = Math.max(1, Math.min(5, (r.variant ?? 1)))
+            // Slightly upscale early levels so L1-L3 read better; L4-5 unchanged
+            const sizeBase = r.radius * 2.6
+            const sizeScale = segments === 1 ? 1.18 : segments === 2 ? 1.12 : segments === 3 ? 1.06 : 1.0
+            const size = sizeBase * sizeScale // base size adjusted by level
+            const halfW = size * 0.55
+            const segH = Math.max(2, size * 0.28) // constant per-segment height → total height scales with level
+            const totalH = segH * segments
+            const ellH = Math.max(2, segH * 0.8) // more pronounced curvature on caps
+
+            // Prep transform for wobble (slight left-right rotation)
+            const cx = r.x, cy = r.y
+            const tnow = performance.now() * 0.001
+            // Deterministic per-core phase from position
+            const phase = Math.sin((cx * 0.017 + cy * 0.013) % Math.PI)
+            const speed = 0.7 + (segments - 1) * 0.08
+            const maxAngle = 0.07 // radians (~4 degrees)
+            const angle = Math.sin(tnow * speed + phase) * maxAngle
+            ctx.save()
+            ctx.translate(cx, cy)
+            ctx.rotate(angle)
+
+            const left = -halfW
+            const right = halfW
+            const topY = -totalH / 2
+            const bottomY = topY + totalH
+
+            // Helpers for subtle banding (lighten/darken base color)
+            const shade = (hex: string, p: number) => {
+              // p in [-1, 1]; positive -> mix toward white, negative -> toward black
+              let h = hex.startsWith('#') ? hex.slice(1) : hex
+              if (h.length === 3) h = h.split('').map(c => c + c).join('')
+              const r0 = parseInt(h.slice(0,2), 16)
+              const g0 = parseInt(h.slice(2,4), 16)
+              const b0 = parseInt(h.slice(4,6), 16)
+              const mix = (c: number) => p >= 0 ? c + (255 - c) * p : c * (1 + p)
+              const r1 = Math.max(0, Math.min(255, Math.round(mix(r0))))
+              const g1 = Math.max(0, Math.min(255, Math.round(mix(g0))))
+              const b1 = Math.max(0, Math.min(255, Math.round(mix(b0))))
+              return `rgb(${r1},${g1},${b1})`
+            }
+
+            // Subtle glow halo
             if (glowFrac > 0) {
-              // soft base fill to make the glow read
-              ctx.globalAlpha = 0.05 * glowFrac
-              ctx.fillStyle = color
-              ctx.fillRect(gx - 1, gy - 1, size + 2, size + 2)
-              // Reduce glow passes in low quality mode
-              const maxPasses = lowQualityMode.current ? 1 : 3
-              for (let pass = maxPasses; pass >= 1; pass--) {
-                ctx.globalAlpha = 0.08 * glowFrac * (pass / maxPasses) + 0.02 * glowFrac
-                ctx.strokeStyle = color
-                ctx.lineWidth = 1 + pass
-                ctx.strokeRect(gx - pass, gy - pass, size + pass * 2, size + pass * 2)
-              }
+              const grad = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, Math.max(halfW, totalH))
+              grad.addColorStop(0, color)
+              grad.addColorStop(1, color + '00')
+              ctx.globalAlpha = 0.06 * glowFrac
+              ctx.fillStyle = grad
+              ctx.beginPath()
+              ctx.ellipse(0, 0, halfW + 3, totalH / 2 + ellH * 0.5, 0, 0, Math.PI * 2)
+              ctx.fill()
+              ctx.globalAlpha = 1
             }
-            // CPU/processor icon: small square with pins
-            const x = gx
-            const y = gy
-            // Base
+
+            // Body fill (single rect spanning all segments) with very light vertical gradient
+            const bodyGrad = ctx.createLinearGradient(0, topY, 0, bottomY)
+            bodyGrad.addColorStop(0, shade(color, 0.06))
+            bodyGrad.addColorStop(1, shade(color, -0.06))
+            ctx.fillStyle = bodyGrad
             ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
-            ctx.fillStyle = "rgba(0,0,0,0.25)"
-            ctx.fillRect(x + 0.7, y + 0.7, size, size)
+            ctx.fillRect(left, topY, halfW * 2, totalH)
+
+            // Top cap (ellipse)
             ctx.globalAlpha = Math.min(1, r.alpha + 0.1)
+            ctx.beginPath()
+            ctx.ellipse(0, topY, halfW, ellH * 0.6, 0, 0, Math.PI * 2)
             ctx.fillStyle = color
-            ctx.fillRect(x, y, size, size)
-            ctx.globalAlpha = 1
-            ctx.strokeStyle = "rgba(0,0,0,0.6)"
+            ctx.fill()
+
+            // Internal curved separators (elliptical strokes)
+            ctx.globalAlpha = 0.28
+            ctx.strokeStyle = 'rgba(0,0,0,0.55)'
             ctx.lineWidth = 1
-            ctx.strokeRect(x, y, size, size)
-            // Pins (3 each side)
-            const pin = Math.max(1, Math.floor(size * 0.12))
-            const step = size / 4
-            ctx.strokeStyle = color
-            ctx.globalAlpha = 0.8
-            for (let k = 1; k <= 3; k++) {
-              const px = x + k * step
-              // top
-              ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px, y - pin); ctx.stroke()
-              // bottom
-              ctx.beginPath(); ctx.moveTo(px, y + size); ctx.lineTo(px, y + size + pin); ctx.stroke()
-              const py = y + k * step
-              // left
-              ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x - pin, py); ctx.stroke()
-              // right
-              ctx.beginPath(); ctx.moveTo(x + size, py); ctx.lineTo(x + size + pin, py); ctx.stroke()
+            for (let s = 1; s < segments; s++) {
+              const y = topY + s * segH
+              ctx.beginPath()
+              // Draw only the front half of the ellipse to avoid showing the back edge
+              ctx.ellipse(0, y, halfW, ellH * 0.65, 0, 0, Math.PI, false)
+              ctx.stroke()
             }
+
+            // Bottom cap (ellipse)
+            ctx.globalAlpha = Math.min(1, r.alpha + 0.1)
+            ctx.beginPath()
+            ctx.ellipse(0, bottomY, halfW, ellH * 0.6, 0, 0, Math.PI * 2)
+            ctx.fillStyle = color
+            ctx.fill()
+
+            // Per-segment subtle banding and tinting based on segment index
+            for (let s = 0; s < segments; s++) {
+              const y0 = topY + s * segH
+              const y1 = y0 + segH
+              // Tint intensity: higher segments slightly lighter
+              const p = 0.05 - (segments > 1 ? (s / (segments - 1)) * 0.1 : 0)
+              const grad = ctx.createLinearGradient(0, y0, 0, y1)
+              grad.addColorStop(0, shade(color, p + 0.03))
+              grad.addColorStop(1, shade(color, p - 0.03))
+              ctx.globalAlpha = 0.4
+              ctx.fillStyle = grad
+              ctx.fillRect(left + 1, y0 + 1, halfW * 2 - 2, segH - 2)
+
+              // Small glowing LED on left side of each band
+              const ledR = Math.max(1, Math.floor(segH * 0.18))
+              const ledX = left + ledR + Math.max(1, Math.floor(size * 0.02))
+              const ledY = y0 + segH * 0.5
+              // Muted blue LED color for all bands (no color change)
+              const ledColor = 'rgb(80,120,195)'
+              // Outer glow (very subtle)
+              ctx.globalAlpha = 0.14
+              ctx.fillStyle = ledColor
+              ctx.beginPath(); ctx.arc(ledX, ledY, ledR * 1.7, 0, Math.PI * 2); ctx.fill()
+              // Inner LED
+              ctx.globalAlpha = 0.6
+              ctx.fillStyle = ledColor
+              ctx.beginPath(); ctx.arc(ledX, ledY, Math.max(1, ledR * 0.7), 0, Math.PI * 2); ctx.fill()
+              ctx.globalAlpha = 1
+            }
+
+            // Right-side subtle highlight
+            ctx.globalAlpha = 0.16
+            ctx.fillStyle = '#ffffff'
+            const hiW = Math.max(1, Math.floor(size * 0.05))
+            ctx.fillRect(right - hiW, topY + 2, Math.max(1, Math.floor(size * 0.035)), totalH - 4)
+            ctx.globalAlpha = 1
+            ctx.restore()
             continue
           }
           // Page icon with sharp corners + diagonal fold line + scribbles
@@ -1377,10 +1739,18 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const clamped = Math.max(15, Math.min(120, Math.round(fps)))
       targetFps.current = clamped
       frameBudgetMs.current = 1000 / clamped
+      // Reflect in state so UI and dependents update
+      try { setTargetFpsState(clamped) } catch {}
     },
     getTargetFps() { return targetFps.current },
     getCurrentFps() { return currentFps.current },
-    setPerformanceMode(v: boolean) { lowQualityMode.current = !!v },
+    setExtremeMode(v: boolean) { setExtremeModeState(!!v) },
+    getExtremeMode() { return extremeMode.current },
+    setPerformanceMode(v: boolean) {
+      const next = !!v
+      lowQualityMode.current = next
+      try { setPerformanceModeState(next) } catch {}
+    },
     getPerformanceMode() { return lowQualityMode.current },
     purchaseIQ(key) {
       if (!persisted.current) return
@@ -1422,7 +1792,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       setUiState(s => ({ ...s, iq: persisted.current!.iq, iqUpgrades: persisted.current!.iqUpgrades }))
     },
     clickAt(x, y) {
-      if (!enabled) return
+      if (!enabledRef.current) return
 
       // Check if game is properly initialized
       if (!persisted.current || !worldW.current || !worldH.current || !points.current.length) {
@@ -1450,7 +1820,6 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         if (points.current[i].state === 'outlier') outlierCount++
       }
       const idx = nearestOutlierWithin(x, y, CLICK_RADIUS)
-      console.log('Click attempt:', { x, y, outlierCount, clickRadius: CLICK_RADIUS, foundIdx: idx, enabled, gameReady: !!persisted.current })
       if (idx !== -1) {
         convertOutlier(idx)
         const upgrades = persisted.current?.upgrades || { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }
@@ -1550,9 +1919,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           const targetLevel = Math.max(1, Math.min(5, level))
 
           // Try stacking first if over threshold
-          if (getTotalCoreCount() >= MAX_CORES || tryStackCore(targetLevel)) {
-            return // Successfully stacked or at limit
-          }
+      if (/* getTotalCoreCount() >= MAX_CORES || */ tryStackCore(targetLevel)) {
+        return // Successfully stacked or at limit
+      }
 
           const newCluster: Cluster = {
             id: clusters.current.length,
@@ -1592,9 +1961,15 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           }
           setUiState(s => ({ ...s, iqUpgrades: persisted.current!.iqUpgrades }))
         }
-      }
+      },
+      setExtremeMode(v: boolean) { try { setExtremeModeState(!!v) } catch {} }
     },
   }), [])
 
   return { state: uiState, api, parallaxY }
 }
+
+
+
+
+

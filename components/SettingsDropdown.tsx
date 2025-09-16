@@ -12,8 +12,8 @@ export type SettingsDropdownProps = {
   onGalaxyToggle: () => void
   targetFps?: number
   onTargetFpsChange?: (fps: number) => void
-  performanceMode?: boolean
-  onPerformanceModeToggle?: () => void
+  qualityMode?: 'low' | 'high' | 'extreme'
+  onQualityModeChange?: (mode: 'low' | 'high' | 'extreme') => void
   showFpsCounter?: boolean
   onFpsCounterToggle?: () => void
 }
@@ -27,8 +27,8 @@ export default function SettingsDropdown({
   onGalaxyToggle,
   targetFps = 30,
   onTargetFpsChange,
-  performanceMode = false,
-  onPerformanceModeToggle,
+  qualityMode = 'high',
+  onQualityModeChange,
   showFpsCounter = false,
   onFpsCounterToggle,
 }: SettingsDropdownProps) {
@@ -133,38 +133,37 @@ export default function SettingsDropdown({
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-zinc-300">Target FPS</span>
-                    <div className="flex items-center gap-1">
-                      {([30, 60] as const).map(fps => (
-                        <button
-                          key={fps}
-                          onClick={() => onTargetFpsChange?.(fps)}
-                          className={`px-1.5 py-0.5 text-[10px] rounded transition-all ${
-                            targetFps === fps
-                              ? 'bg-blue-500/20 border border-blue-500/50 text-blue-200'
-                              : 'bg-zinc-700/30 border border-zinc-600/50 text-zinc-400 hover:bg-zinc-600/30'
-                          }`}
-                        >
-                          {fps}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-zinc-300">Quality Mode</span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-300">Target FPS</span>
+                <div className="flex items-center gap-1">
+                  {([30, 60] as const).map(fps => (
                     <button
-                      onClick={onPerformanceModeToggle}
-                      className={`px-2 py-1 text-[10px] rounded transition-all ${
-                        performanceMode
-                          ? 'bg-orange-500/20 border border-orange-500/50 text-orange-200'
-                          : 'bg-blue-500/20 border border-blue-500/50 text-blue-200'
+                      key={fps}
+                      onClick={() => onTargetFpsChange?.(fps)}
+                      className={`px-1.5 py-0.5 text-[10px] rounded transition-all ${
+                        targetFps === fps
+                          ? 'bg-blue-500/20 border border-blue-500/50 text-blue-200'
+                          : 'bg-zinc-700/30 border border-zinc-600/50 text-zinc-400 hover:bg-zinc-600/30'
                       }`}
                     >
-                      {performanceMode ? 'Low' : 'High'}
+                      {fps}
                     </button>
-                  </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-300">Quality Mode</span>
+                <select
+                  value={qualityMode}
+                  onChange={(e) => onQualityModeChange?.(e.target.value as 'low' | 'high' | 'extreme')}
+                  className="px-2 py-1 text-[10px] rounded bg-zinc-800/60 border border-zinc-700/70 text-zinc-200 hover:bg-zinc-700/60 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="low">Low</option>
+                  <option value="high">High</option>
+                  <option value="extreme">Extreme</option>
+                </select>
+              </div>
 
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-zinc-300">FPS Counter</span>

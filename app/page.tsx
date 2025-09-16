@@ -41,7 +41,6 @@ export default function Page() {
   useEffect(() => {
     setGameStarted(true)
     setGalaxyOn(true)
-    setHudCollapsed(false)
     setShowGameIntro(false)
     setShowInstr(false)
   }, [])
@@ -57,8 +56,8 @@ export default function Page() {
   useEffect(() => {
     let raf = 0
     let last = performance.now()
-    let targetMs = 1000 / (galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30)
-    const onVis = () => { /* update target on visibility resume */ targetMs = 1000 / (galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30) }
+    const getBudget = () => 1000 / (galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30)
+    const onVis = () => { /* no-op: budget recalculated each frame */ }
     document.addEventListener('visibilitychange', onVis)
     const smoothLerp = (a: number, b: number, t: number) => {
       const diff = b - a
@@ -66,6 +65,7 @@ export default function Page() {
       return a + diff * easedT
     }
     const tick = () => {
+      const targetMs = getBudget()
       const now = performance.now()
       if (now - last >= targetMs) {
         last = now
@@ -159,8 +159,21 @@ export default function Page() {
             onGalaxyToggle={() => setGalaxyOn(v => !v)}
             targetFps={galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30}
             onTargetFpsChange={(fps) => galaxy.api?.setTargetFps?.(fps)}
-            performanceMode={galaxy.api?.getPerformanceMode ? galaxy.api.getPerformanceMode() : false}
-            onPerformanceModeToggle={() => galaxy.api?.setPerformanceMode?.(!galaxy.api?.getPerformanceMode?.())}
+            qualityMode={
+              galaxy.api?.getExtremeMode?.() ? 'extreme' : (galaxy.api?.getPerformanceMode?.() ? 'low' : 'high')
+            }
+            onQualityModeChange={(mode) => {
+              if (mode === 'low') {
+                galaxy.api?.setExtremeMode?.(false)
+                galaxy.api?.setPerformanceMode?.(true)
+              } else if (mode === 'high') {
+                galaxy.api?.setExtremeMode?.(false)
+                galaxy.api?.setPerformanceMode?.(false)
+              } else if (mode === 'extreme') {
+                galaxy.api?.setPerformanceMode?.(false)
+                galaxy.api?.setExtremeMode?.(true)
+              }
+            }}
             showFpsCounter={showFpsCounter}
             onFpsCounterToggle={() => setShowFpsCounter(v => !v)}
           />

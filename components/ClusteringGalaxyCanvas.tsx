@@ -68,7 +68,6 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       const rect = canvas.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
-      console.log('Canvas click:', { x, y, canvasSize: { w: canvas.clientWidth, h: canvas.clientHeight }, rect })
       api.clickAt(x, y)
     }
     canvas.addEventListener("click", onClick)

@@ -187,13 +187,11 @@ export default function StarfieldCanvas({ enabled, parallaxY, getTargetFps, lowQ
           if (x < -cullMargin || y < -cullMargin || x > w + cullMargin || y > h + cullMargin) continue
           drawnCount++
           const alpha = prefersReduced ? 0.9 : (0.75 + 0.25 * Math.sin(s.twinklePhase + now * 0.001 * s.twinkleSpeed))
-
-          // Simple bright colored circles - back to what was working
+          // Tiny rects per README/PERF guidance (faster than arcs)
           ctx.globalAlpha = Math.min(0.8, alpha * 0.7)
           ctx.fillStyle = s.color
-          ctx.beginPath()
-          ctx.arc(x, y, s.size * 2, 0, Math.PI * 2)
-          ctx.fill()
+          const sz = Math.max(1, Math.round(s.size))
+          ctx.fillRect(x, y, sz, sz)
         }
       }
 
@@ -213,6 +211,5 @@ export default function StarfieldCanvas({ enabled, parallaxY, getTargetFps, lowQ
     />
   )
 }
-
 
 

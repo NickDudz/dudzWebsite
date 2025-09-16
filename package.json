@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "set NODE_ENV=development&& next dev",
     "build": "set NODE_ENV=production&& next build",
+    "clean": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true})}catch(e){}\"",
+    "dev:clean": "npm run clean && npm run dev",
+    "build:clean": "npm run clean && npm run build",
     "build:safe": "node scripts/safe-build.mjs",
     "dev:safe": "node scripts/safe-build.mjs --dev",
     "start": "next start",

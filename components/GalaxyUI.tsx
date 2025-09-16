@@ -8,7 +8,7 @@ const { upgradeCost } = require("../hooks/galaxyMath.js") as { upgradeCost: (k: 
 
 export type GalaxyUIProps = {
   state: { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades?: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean } }
-  api: { purchase: (k: keyof Upgrades, qty?: number) => void; purchaseIQ?: (k: 'computeMult' | 'autoCollect' | 'confetti' | 'palette') => void; triggerEffect: (name: "confetti" | "palette") => void; getStats?: () => { tokensPerSec: number; coresByLevel: number[]; totalEverCollected: number; currentFloatingData: number }; debug?: { addTokens: (amount: number) => void; addIQ: (amount: number) => void; addCores: (levels: number[]) => void; setUpgradeLevel: (upgradeKey: keyof Upgrades, level: number) => void; setIQUpgradeLevel: (upgradeKey: 'computeMult' | 'autoCollect' | 'confettiUnlocked' | 'paletteUnlocked', level: number) => void } }
+  api: { purchase: (k: keyof Upgrades, qty?: number) => void; purchaseIQ?: (k: 'computeMult' | 'autoCollect' | 'confetti' | 'palette') => void; triggerEffect: (name: "confetti" | "palette") => void; getStats?: () => { tokensPerSec: number; coresByLevel: number[]; totalEverCollected: number; currentFloatingData: number }; getExtremeMode?: () => boolean; setExtremeMode?: (v: boolean) => void; debug?: { addTokens: (amount: number) => void; addIQ: (amount: number) => void; addCores: (levels: number[]) => void; setUpgradeLevel: (upgradeKey: keyof Upgrades, level: number) => void; setIQUpgradeLevel: (upgradeKey: 'computeMult' | 'autoCollect' | 'confettiUnlocked' | 'paletteUnlocked', level: number) => void; setExtremeMode?: (v: boolean) => void } }
   onToggle: () => void
   enabled?: boolean
   collapsed?: boolean
@@ -20,7 +20,7 @@ export type GalaxyUIProps = {
 export default function GalaxyUI({ state, api, onToggle, enabled = true, collapsed = true, onCollapsedChange, sidebar = false, onSidebarToggle }: GalaxyUIProps) {
   const [buyQuantity, setBuyQuantity] = useState(1)
   const rows = useMemo(() => ([
-    { key: "spawnRate", label: "Data Ingest", desc: "↑ spawn chance frequency" },
+    { key: "spawnRate", label: "Data Ingest", desc: "- spawn chance frequency" },
     { key: "spawnQty", label: "Spawn Qty", desc: "spawn multiple per wave (max 5)" },
     { key: "clickYield", label: "Label Quality", desc: "+1 click tokens / level" },
     { key: "batchCollect", label: "Mini-Batch", desc: "+10% chance/level; collect all" },
@@ -29,31 +29,46 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
   const stats = api.getStats ? api.getStats() : { tokensPerSec: 0, coresByLevel: [0,0,0,0,0], totalEverCollected: 0, currentFloatingData: 0 }
   const totalCores = stats.coresByLevel.reduce((a, b) => a + b, 0)
 
+  const coreColors = useMemo(() => ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"], [])
+  const primaryGradientStops = useMemo(() => {
+    const first = coreColors[0]
+    const mid = coreColors[Math.min(2, coreColors.length - 1)]
+    const last = coreColors[Math.max(coreColors.length - 1, 0)]
+    return `${first}, ${mid}, ${last}`
+  }, [coreColors])
+  const coreGradientStyle = useMemo(() => ({
+    backgroundImage: `linear-gradient(90deg, ${primaryGradientStops})`,
+    WebkitBackgroundClip: "text",
+    backgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    color: "transparent",
+  }), [primaryGradientStops])
+
   // Top-right trigger button (dropdown opener)
   const trigger = (
-    <div className="fixed top-3 right-20 z-40">
+    <div className="fixed top-4 right-4 z-30 pointer-events-auto">
       <button
         onClick={() => onCollapsedChange && onCollapsedChange(!collapsed)}
-        className="rounded-lg border border-zinc-700/40 bg-zinc-900/80 backdrop-blur-md px-4 py-2.5 text-[13px] sm:text-sm font-medium text-zinc-100 shadow-lg hover:bg-zinc-800/80 hover:border-zinc-600/50 transition-all duration-200"
+        className="group inline-flex items-center gap-2 rounded-md border border-zinc-700/50 bg-zinc-900/70 px-3 py-2 text-[11px] font-medium text-zinc-300 shadow-sm backdrop-blur-sm transition hover:bg-zinc-800/70 hover:border-zinc-600/60"
         aria-expanded={!collapsed}
         aria-controls="galaxy-ui-panel"
       >
-        <span className="bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
-          Data Continuum Idle
-        </span>
-        <span className="ml-2 text-zinc-400">{collapsed ? '▾' : '▴'}</span>
+        <span style={coreGradientStyle} className="tracking-tight">Data Continuum Idle</span>
+        <svg className="h-3 w-3 text-zinc-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+          <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.585l3.71-3.354a.75.75 0 011.04 1.08l-4.24 3.833a.75.75 0 01-1.04 0L5.21 8.29a.75.75 0 01.02-1.08z" />
+        </svg>
       </button>
     </div>
   )
 
   // Core colors matching the game engine - blue and purple gradient, no dots for L1-L5
-  const coreColors = ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"]
+  // (defined above)
 
   // Common sticky header content for both dropdown and sidebar
   const Header = (
     <div className="sticky top-0 z-10 border-b border-zinc-700/50 bg-zinc-900/95 backdrop-blur px-4 py-3">
       <div className="flex items-center justify-between gap-3 mb-3">
-        <div className="font-semibold text-sm bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">Data Continuum Idle</div>
+        <div className="font-semibold text-sm" style={coreGradientStyle}>Data Continuum Idle</div>
         <div className="text-right text-sm space-x-4">
           <span className="inline-flex items-center gap-1">
             <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
@@ -358,6 +373,31 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
           </div>
           </div>
         </div>
+
+        {/* Debug tools (dev only) */}
+        {api.debug?.addCores && (
+          <div className="px-4 py-3">
+            <div className="text-[11px] font-semibold text-zinc-400 mb-2">Debug</div>
+            <button
+              onClick={() => {
+                const arr: number[] = []
+                for (let r = 0; r < 20; r++) arr.push(1, 2, 3, 4, 5)
+                api.debug!.addCores(arr)
+              }}
+              className="w-full rounded border border-zinc-700/70 bg-zinc-800/60 px-3 py-2 text-[12px] font-semibold text-zinc-200 hover:bg-zinc-700/60 transition"
+            >
+              Spawn 20× cores (L1–L5)
+            </button>
+            {api.setExtremeMode && (
+              <button
+                onClick={() => api.setExtremeMode && api.setExtremeMode(!api.getExtremeMode?.())}
+                className="mt-2 w-full rounded border border-red-600/60 bg-red-600/20 px-3 py-2 text-[12px] font-semibold text-red-200 hover:bg-red-600/30 transition"
+              >
+                Toggle Extreme Mode
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -596,6 +636,8 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
     </>
   )
 }
+
+
 
 
 
