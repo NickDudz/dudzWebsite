@@ -110,12 +110,13 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
   if (!unlocked) return null
 
   const ColorSwatch = ({ color, label, onOpen }: { color: string; label: string; onOpen: () => void }) => (
-    <div className="flex flex-col gap-1 relative">
+    <div className="flex flex-col gap-1 relative select-none">
       <label className="text-[10px] text-zinc-400">{label}</label>
       <button
-        onClick={onOpen}
-        className="w-8 h-8 border border-zinc-700 rounded cursor-pointer"
-        style={{ backgroundColor: color }}
+        onPointerDown={(e) => { e.preventDefault(); onOpen() }}
+        className="w-10 h-10 border border-zinc-700 rounded cursor-pointer touch-manipulation active:scale-95 transition-transform"
+        style={{ backgroundColor: color, WebkitTapHighlightColor: 'transparent' as any }}
+        aria-label={`Choose color for ${label}`}
       />
     </div>
   )
