@@ -17,8 +17,7 @@ A modern portfolio website built with Next.js 15, featuring an animated starfiel
 **Branch**: `feature/clicker-game-rework`
 **Status**: Fully functional with recent stability and UX improvements
 
-Recent improvements completed:
-- ✅ Fixed array overflow crashes with render bounds checking
+Recent improvements completed:`n- ✅ Fixed cosmetics color picker auto-close via centralized modal overlay`n- ✅ Fixed array overflow crashes with render bounds checking`n- ✅ Added 1000 core limit to prevent exponential performance issues`n- ✅ Improved data tracking system (manual clicks + auto-collect)`n- ✅ Polished Galaxy HUD with blue-purple gradient design`n- ✅ Enhanced buy quantity system (1x, 5x, 20x)`n- ✅ Responsive dropdown/sidebar layout improvements`n- ✅ Debug functions for testing and development`n`n- ✅ Fixed array overflow crashes with render bounds checking
 - ✅ Added 1000 core limit to prevent exponential performance issues
 - ✅ Improved data tracking system (manual clicks + auto-collect)
 - ✅ Polished Galaxy HUD with blue-purple gradient design
