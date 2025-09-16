@@ -66,6 +66,7 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
     label: string
   }>(null)
   const [pickerTempColor, setPickerTempColor] = useState<string | null>(null)
+  const [recentColors, setRecentColors] = useState<string[]>([])
 
 
   // Close picker on Escape
@@ -80,6 +81,30 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
 
   const closePicker = (_reason: string) => {
     setOpenPicker(null)
+  }
+
+  // Load/save recent colors (persist last 5)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('cosmetics.recentColors')
+      if (raw) {
+        const arr = JSON.parse(raw)
+        if (Array.isArray(arr)) {
+          setRecentColors(arr.filter(Boolean).slice(0, 5))
+          return
+        }
+      }
+    } catch {}
+    // Default to 5 whites
+    setRecentColors(new Array(5).fill('#ffffff'))
+  }, [])
+
+  const addRecentColor = (c: string) => {
+    setRecentColors(prev => {
+      const next = [c, ...prev.filter(x => x && x.toLowerCase() !== c.toLowerCase())].slice(0, 5)
+      try { localStorage.setItem('cosmetics.recentColors', JSON.stringify(next)) } catch {}
+      return next
+    })
   }
 
   if (!unlocked) return null
@@ -314,10 +339,40 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                   }
                   apply(presetColor)
                   setPickerTempColor(presetColor)
+                  addRecentColor(presetColor)
                   closePicker('preset-select')
                 }}
                 className="w-6 h-6 rounded border border-zinc-600 hover:scale-110 transition-transform"
                 style={{ backgroundColor: presetColor }}
+              />
+            ))}
+          </div>
+          {/* Recent colors row */}
+          <div className="mb-2 text-[10px] text-zinc-400">Recent</div>
+          <div className="grid grid-cols-5 gap-1 mb-3">
+            {(recentColors.length ? recentColors : new Array(5).fill('#ffffff')).slice(0,5).map((rc, idx) => (
+              <button
+                key={`recent-${idx}-${rc}`}
+                onClick={() => {
+                  const apply = (c: string) => {
+                    if (openPicker.group === 'core') {
+                      const newColors = [...settings.coreColors]
+                      newColors[openPicker.index] = c
+                      onSettingsChange({ ...settings, coreColors: newColors })
+                    } else {
+                      const newColors = [...settings.ambientColors]
+                      newColors[openPicker.index] = c
+                      onSettingsChange({ ...settings, ambientColors: newColors.filter(Boolean) })
+                    }
+                  }
+                  apply(rc)
+                  setPickerTempColor(rc)
+                  addRecentColor(rc)
+                  closePicker('recent-select')
+                }}
+                className="w-6 h-6 rounded border border-zinc-600 hover:scale-110 transition-transform"
+                style={{ backgroundColor: rc || '#ffffff' }}
+                title={rc}
               />
             ))}
           </div>
@@ -336,6 +391,7 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                 newColors[openPicker.index] = c
                 onSettingsChange({ ...settings, ambientColors: newColors.filter(Boolean) })
               }
+              addRecentColor(c)
             }}
             className="w-full h-8 border border-zinc-600 rounded"
           />
