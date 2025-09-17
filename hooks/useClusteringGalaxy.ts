@@ -109,6 +109,28 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const enabledRef = useRef(enabled)
   useEffect(() => { enabledRef.current = enabled }, [enabled])
 
+  // Device profile (simple heuristic for mobile tuning)
+  const isMobileRef = useRef<boolean>(false)
+  function updateDeviceProfile() {
+    try {
+      const w = typeof window !== 'undefined' ? window.innerWidth : 1200
+      const h = typeof window !== 'undefined' ? window.innerHeight : 800
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
+      // Treat narrow viewports or mobile UA as mobile
+      isMobileRef.current = (w <= 820 || /Mobile|Android|iP(ad|hone|od)|IEMobile|BlackBerry/i.test(ua))
+    } catch { isMobileRef.current = false }
+  }
+  useEffect(() => {
+    updateDeviceProfile()
+    const onResize = () => updateDeviceProfile()
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', onResize, { passive: true })
+    }
+    return () => {
+      if (typeof window !== 'undefined') window.removeEventListener('resize', onResize)
+    }
+  }, [])
+
   // Constants (initial balancing in BALANCING.md)
   const {
     PASSIVE_BASE,
@@ -1487,7 +1509,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       } else {
         ambientFactor = 0
       }
-    const maxAmbient = Math.max(0, Math.floor(availableForData * 0.6 * ambientFactor))
+    // Density-aware cap: clamp ambient by viewport area to avoid clutter on mobile
+    // Choose a target density (points per pixel). Lower for mobile to reduce clutter.
+    const area = Math.max(1, W * H)
+    const targetDensity = isMobileRef.current ? 0.00003 : 0.00008 // tuned: ~24 vs ~64 per 800x1000
+    const densityCap = Math.floor(area * targetDensity)
+    const maxAmbient = Math.max(0, Math.min(densityCap, Math.floor(availableForData * 0.6 * ambientFactor)))
     for (let i = 0; i < points.current.length && ambientCount < maxAmbient; i++) {
       const p = points.current[i]
       if (p.state === "ambient") {
