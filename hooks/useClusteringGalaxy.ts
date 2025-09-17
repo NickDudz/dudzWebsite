@@ -131,6 +131,36 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     }
   }, [])
 
+  // Virtual world scaling
+  const WORLD_VU = 1000 // canonical virtual units across the shortest screen axis
+  const zoomRef = useRef<number>(1)
+  function updateZoom() {
+    const w = worldW.current || (typeof window !== 'undefined' ? window.innerWidth : 1200)
+    const h = worldH.current || (typeof window !== 'undefined' ? window.innerHeight : 800)
+    const shortest = Math.max(1, Math.min(w, h))
+    zoomRef.current = shortest / WORLD_VU
+  }
+  function screenToWorld(x: number, y: number): { x: number; y: number } {
+    const w = worldW.current || 0
+    const h = worldH.current || 0
+    const z = zoomRef.current || 1
+    const cx = w * 0.5, cy = h * 0.5
+    return { x: (x - cx) / z + WORLD_VU * 0.5, y: (y - cy) / z + WORLD_VU * 0.5 }
+  }
+  function worldToScreen(x: number, y: number): { x: number; y: number } {
+    const w = worldW.current || 0
+    const h = worldH.current || 0
+    const z = zoomRef.current || 1
+    const cx = w * 0.5, cy = h * 0.5
+    return { x: cx + (x - WORLD_VU * 0.5) * z, y: cy + (y - WORLD_VU * 0.5) * z }
+  }
+  useEffect(() => {
+    updateZoom()
+    const onResize = () => updateZoom()
+    if (typeof window !== 'undefined') window.addEventListener('resize', onResize, { passive: true })
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('resize', onResize) }
+  }, [])
+
   // Consistent central clear zone radius (as fraction of min viewport dimension)
   function getClearRadius(): number {
     const w = worldW.current || (typeof window !== 'undefined' ? window.innerWidth : 1200)
@@ -416,7 +446,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
     // Update orbital center and base radius
     orbitalCenter.current = { x: W * 0.5, y: H * 0.5 }
-    orbitalRadius.current = Math.min(W, H) * 0.25
+    // Base radius in virtual units, scaled by zoom to pixels
+    const z = zoomRef.current || 1
+    const baseOrbitalRadiusVU = 260 // consistent orbit distance in VU
+    orbitalRadius.current = baseOrbitalRadiusVU * z
 
     // Initialize orbital angles and radii for new cores only (preserve existing)
     while (orbitalAngles.current.length < clusters.current.length) {
@@ -509,8 +542,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       let coreRadius = orbitalRadii.current[i]
       if (coreRadius === undefined) {
         const baseRadius = orbitalRadius.current
-        const levelFactor = (cluster.level - 1) * 0.08
-        const stackFactor = (cluster.stackCount || 1) > 1 ? 0.05 : 0
+      const levelFactor = (cluster.level - 1) * 0.08
+      const stackFactor = (cluster.stackCount || 1) > 1 ? 0.05 : 0
         const randomVariation = (Math.random() - 0.5) * 0.1
         const radiusMultiplier = 0.95 + levelFactor + stackFactor + randomVariation
         coreRadius = baseRadius * radiusMultiplier
@@ -528,9 +561,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const bouncePhase = bouncePhases.current[i]
       const bounceTime = timeMs * 0.001 * bounceFreq + bouncePhase
 
-      // Bounce amplitude varies slightly by core level for more variety
-      const levelBasedAmplitude = 20 + (cluster.level - 1) * 20 // 8-16px amplitude
-      const bounceOffset = Math.sin(bounceTime) * levelBasedAmplitude
+      // Bounce amplitude expressed in VU for consistency across devices
+      const z2 = zoomRef.current || 1
+      const levelBasedAmplitudeVU = 10 + (cluster.level - 1) * 8 // VU
+      const levelBasedAmplitudePX = levelBasedAmplitudeVU * z2
+      const bounceOffset = Math.sin(bounceTime) * levelBasedAmplitudePX
 
       // Calculate radial direction for perpendicular (inward/outward) bounce
       const bounceX = Math.cos(angle) * bounceOffset
@@ -963,15 +998,18 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         if (p.state === "ambient" && !reducedMotion.current) {
           // Maintain a consistent central clear zone across devices
           {
-            const cx = worldW.current * 0.5
-            const cy = worldH.current * 0.5
+            // Compute clear radius in virtual units and apply using screen coordinates
+            const w = worldW.current, h = worldH.current
+            const z = zoomRef.current || 1
+            const cx = w * 0.5
+            const cy = h * 0.5
             const dx = p.x - cx
             const dy = p.y - cy
             const r = Math.sqrt(dx * dx + dy * dy) + 1e-6
-            const clearR = getClearRadius()
-            if (r < clearR) {
-              // Stronger radial push to ensure clearing is visible
-              const push = Math.max(40, (clearR - r) * 1.25) // px/sec
+            const clearR_vu = 180 // fixed hole radius in virtual units
+            const clearR_px = clearR_vu * z
+            if (r < clearR_px) {
+              const push = Math.max(60, (clearR_px - r) * 1.3)
               const ux = dx / r, uy = dy / r
               p.x += ux * push * dt
               p.y += uy * push * dt
@@ -1022,7 +1060,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           }
 
           // Use rigid orbital mathematics instead of physics-based movement
-          const targetR = p.orbitR ?? 34
+          const z = zoomRef.current || 1
+          const rvu = (p as any).orbitRvu
+          const targetR = (rvu != null ? rvu * z : (p.orbitR ?? 34))
           p.orbitPhase = (p.orbitPhase ?? 0) + dt * (0.6 + (p.id % 3) * 0.1) // Slower orbit
 
           // Calculate ideal orbital position relative to core
@@ -1075,7 +1115,14 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           p.state = 'clustered'
           p.clusterId = p.targetCluster
           p.alpha = 0.6
-          p.orbitR = 32 + Math.random() * 20
+          // Assign orbit radius in virtual units based on target core level
+          try {
+            const tc = (p.targetCluster != null) ? clusters.current[p.targetCluster] : undefined
+            const lvl = tc ? Math.max(1, Math.min(5, tc.level)) : 1
+            const base = [22, 26, 30, 34, 38][lvl - 1]
+            const span = [8, 8, 8, 8, 10][lvl - 1]
+            ;(p as any).orbitRvu = base + Math.random() * span
+          } catch { (p as any).orbitRvu = 28 + Math.random() * 10 }
           p.orbitPhase = Math.random() * Math.PI * 2
           const c2 = clusters.current[p.targetCluster]
           c2.members += 1
@@ -1639,7 +1686,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const scaleMultiplier = c.scaleMultiplier || 1.0
       // Slightly enlarge halo when core is stacked to hint at multiplicity
       const stackBoost = (c.stackCount && c.stackCount > 1) ? 1.12 : 1.0
-      halo.radius = (16 + c.level * 4 + Math.min(12, c.members * 0.2) + (c.flashT > 0 ? 5 : 0)) * scaleMultiplier * stackBoost
+      // Scale radius by zoom so visual sizes remain consistent across devices
+      halo.radius = (16 + c.level * 4 + Math.min(12, c.members * 0.2) + (c.flashT > 0 ? 5 : 0)) * (zoomRef.current || 1) * scaleMultiplier * stackBoost
       halo.alpha = (0.02 + 0.04 * prog) * (1 + c.level * 0.3) // Brighter for higher levels
       halo.color = c.colorIndex
       halo.shape = 'halo'
@@ -1647,7 +1695,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const dot = drawBuffer[n++]
       dot.x = c.x
       dot.y = c.y
-      dot.radius = (5 + c.level * 2) * scaleMultiplier
+      dot.radius = (5 + c.level * 2) * (zoomRef.current || 1) * scaleMultiplier
       dot.alpha = 0.98
       dot.color = c.colorIndex
       dot.shape = 'core'
@@ -2464,6 +2512,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         console.warn('Click coordinates out of bounds:', { x, y, worldW: worldW.current, worldH: worldH.current })
         return
       }
+      // Map to virtual units for unlockable tests if needed (currently hit tests are in screen px)
       // Unlockable click detection has priority
       if (unlockables.current.length > 0) {
         for (let i = unlockables.current.length - 1; i >= 0; i--) {
