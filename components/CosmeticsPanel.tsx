@@ -203,6 +203,56 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
         </svg>
       )
     }
+    if (id === 'pentagon') {
+      const r = s * 0.48
+      const pts: string[] = []
+      for (let i = 0; i < 5; i++) {
+        const a = (Math.PI * 2 * i) / 5 - Math.PI / 2
+        const x = half + Math.cos(a) * r
+        const y = half + Math.sin(a) * r
+        pts.push(`${x},${y}`)
+      }
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <polygon points={pts.join(' ')} fill={fill} />
+        </svg>
+      )
+    }
+    if (id === 'octagon') {
+      const r = s * 0.48
+      const pts: string[] = []
+      for (let i = 0; i < 8; i++) {
+        const a = (Math.PI * 2 * i) / 8 - Math.PI / 8
+        const x = half + Math.cos(a) * r
+        const y = half + Math.sin(a) * r
+        pts.push(`${x},${y}`)
+      }
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <polygon points={pts.join(' ')} fill={fill} />
+        </svg>
+      )
+    }
+    if (id === 'chevron') {
+      const w = s * 0.9
+      const h = s * 0.6
+      const x0 = half - w / 2
+      const y0 = half - h / 2
+      const t = Math.max(2, s * 0.18)
+      const pts = [
+        [x0, y0],
+        [x0 + w * 0.6, y0 + h / 2],
+        [x0, y0 + h],
+        [x0 + t, y0 + h],
+        [x0 + w * 0.6 + t, y0 + h / 2],
+        [x0 + t, y0],
+      ]
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <polygon points={pts.map(p=>p.join(',')).join(' ')} fill={fill} />
+        </svg>
+      )
+    }
     if (id === 'plus') {
       const w = s * 0.18
       const l = s * 0.5
@@ -412,6 +462,28 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                       const color = pct>=1?'text-green-400': pct>=0.75?'text-lime-300': pct>=0.5?'text-yellow-400': pct>=0.25?'text-orange-400':'text-red-500'
                       return <div className="mt-2 text-[11px] text-zinc-400">Collected: <span className={`font-semibold ${color}`}>{cnt}</span>/{total}</div>
                     })()}
+                  </div>
+
+                  {/* Locked section */}
+                  <div>
+                    <h3 className="text-[12px] font-semibold text-zinc-300 mb-2">Locked</h3>
+                    <div className="grid grid-cols-8 gap-2">
+                      {(() => {
+                        const unlocked = new Set(settings.unlockedSprites && settings.unlockedSprites.length ? settings.unlockedSprites : ALL_SPRITES.map(s=>s.id))
+                        const locked = ALL_SPRITES.map(s=>s.id).filter(id => !unlocked.has(id))
+                        return locked.map(id => (
+                          <div
+                            key={`locked-${id}`}
+                            className="relative h-10 rounded border border-zinc-700/60 bg-zinc-800/30 text-zinc-500 flex items-center justify-center opacity-50 select-none"
+                            title={(ALL_SPRITES.find(s=>s.id===id)?.name || id) + ' (Locked)'}
+                            aria-disabled
+                          >
+                            <SpritePreview id={id} size={16} />
+                            <div className="absolute inset-0 rounded bg-black/10" />
+                          </div>
+                        ))
+                      })()}
+                    </div>
                   </div>
                 </div>
               )}

@@ -434,7 +434,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
         aria-expanded={!collapsed}
         aria-controls="galaxy-ui-panel"
       >
-        <span style={coreGradientStyle} className="tracking-tight">Data Continuum Idle</span>
+        <span style={coreGradientStyle} className="tracking-tight" suppressHydrationWarning>Data Continuum Idle</span>
         <svg className="h-3 w-3 text-zinc-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
           <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.585l3.71-3.354a.75.75 0 011.04 1.08l-4.24 3.833a.75.75 0 01-1.04 0L5.21 8.29a.75.75 0 01.02-1.08z" />
         </svg>
@@ -450,7 +450,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
     <div className="sticky top-0 z-10 border-b border-zinc-700/50 bg-zinc-900/95 backdrop-blur px-4 py-3">
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <div className="font-semibold text-sm" style={coreGradientStyle}>Data Continuum Idle</div>
+          <div className="font-semibold text-sm" style={coreGradientStyle} suppressHydrationWarning>Data Continuum Idle</div>
           <button
             onClick={() => onSidebarToggle && onSidebarToggle()}
             className="inline-flex items-center justify-center w-7 h-7 rounded border border-zinc-600/70 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60"
@@ -491,7 +491,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
   // Dropdown panel (compact) - narrower than sidebar
   const DropdownPanel = (
     <div id="galaxy-ui-panel" role="region" aria-label="Clustering Galaxy Controls"
-      className="fixed right-3 top-12 z-40 w-[90vw] max-w-[22rem] max-h-[75vh] overflow-y-auto overflow-x-hidden small-scrollbar rounded-lg border border-zinc-700/60 bg-zinc-900/95 backdrop-blur text-zinc-200 shadow-[0_0_20px_rgba(59,130,246,0.15)]">
+      className="fixed right-3 top-12 z-40 w-[90vw] max-w-[22rem] max-h-[75vh] overflow-y-auto overflow-x-hidden small-scrollbar rounded-lg border border-zinc-700/60 bg-zinc-900/95 backdrop-blur text-zinc-200 shadow-[0_0_20px_rgba(59,130,246,0.15)] pointer-events-auto">
       {renderHeader()}
       <div className="space-y-2 py-2">
         {renderSwarmSection()}
@@ -528,7 +528,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
 
   // Sidebar (expanded)
   const Sidebar = (
-    <div className="fixed inset-y-0 right-0 z-50 w-[100vw] sm:w-[24rem] border-l border-zinc-700/60 bg-zinc-900/95 backdrop-blur text-zinc-200 shadow-[0_0_28px_rgba(59,130,246,0.25)] overflow-y-auto overflow-x-hidden small-scrollbar">
+    <div className="fixed inset-y-0 right-0 z-50 w-[100vw] sm:w-[24rem] border-l border-zinc-700/60 bg-zinc-900/95 backdrop-blur text-zinc-200 shadow-[0_0_28px_rgba(59,130,246,0.25)] overflow-y-auto overflow-x-hidden small-scrollbar pointer-events-auto">
       {renderHeader()}
       <div className="space-y-1">
         {renderSwarmSection()}

@@ -1,3 +1,16 @@
+## 🎉 UPDATE: Current Status (2025-09-17)
+
+Key additions and fixes since the last handoff:
+- Unlockable sprite system finalized: timed spawns (~60s), click-to-unlock with spin/shake/crack/ break animation, pulsing color-matched glow, and unlock toast.
+- Cosmetics persistence stabilized and normalized; UI reflects unlocks immediately without reload. Special color shifts (Neon RGB and Custom Shift with speed slider) drive core and unlockable colors.
+- Clear Save Data fully resets economy (tokens/IQ/upgrades), clears total collected, respawns a single L1 core, and locks all sprites except `database`.
+- Click-through usability at the top of the screen: pointer-events layering ensures the canvas remains clickable except over interactive controls; toasts are non-interactive.
+- Hydration mismatch noise reduced via `suppressHydrationWarning` on root `<html>` and gradient text spans.
+
+See CHANGELOG for the dated list of changes.
+
+---
+
 ## 🎉 UPDATE: Issues Resolved (2025-01-15)
 
 **All major issues described below have been FIXED**. The game is now stable and production-ready.

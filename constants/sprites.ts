@@ -13,6 +13,10 @@ export const ALL_SPRITES: SpriteDef[] = [
   { id: 'hexagon', name: 'Hexagon' },
   { id: 'ring', name: 'Ring' },
   { id: 'plus', name: 'Plus' },
+  // New drawn shapes (locked by default for testing)
+  { id: 'pentagon', name: 'Pentagon' },
+  { id: 'octagon', name: 'Octagon' },
+  { id: 'chevron', name: 'Chevron' },
   // Emoji/text-based
   { id: 'heart', name: 'Heart', emoji: '❤️' },
   { id: 'club', name: 'Club', emoji: '♣️' },
@@ -36,6 +40,9 @@ export const ALL_SPRITES: SpriteDef[] = [
   { id: 'shocked', name: 'Shocked', emoji: '😲' },
   { id: 'sweat', name: 'Sweat', emoji: '😅' },
   { id: 'numbered', name: 'Numbered', emoji: '#️⃣' },
+  // New emoji sprites (locked by default for testing)
+  { id: 'rocket', name: 'Rocket', emoji: '🚀' },
+  { id: 'unicorn', name: 'Unicorn', emoji: '🦄' },
 ]
 
 export const ALL_SPRITE_IDS: string[] = ALL_SPRITES.map(s => s.id)
@@ -43,4 +50,7 @@ export const ALL_SPRITE_IDS: string[] = ALL_SPRITES.map(s => s.id)
 export const SPRITE_EMOJI: Record<string, string> = Object.fromEntries(
   ALL_SPRITES.filter(s => s.emoji).map(s => [s.id, s.emoji as string])
 )
+
+// IDs that should be locked by default on fresh installs for testing
+export const DEFAULT_LOCKED_SPRITES: string[] = ['pentagon', 'octagon', 'chevron', 'rocket', 'unicorn']
 

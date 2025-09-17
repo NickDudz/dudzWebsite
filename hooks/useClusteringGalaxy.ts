@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { GAME_CONFIG } from "../constants/gameConstants"
-import { SPRITE_EMOJI, ALL_SPRITE_IDS } from "../constants/sprites"
+import { SPRITE_EMOJI, ALL_SPRITE_IDS, DEFAULT_LOCKED_SPRITES, ALL_SPRITES } from "../constants/sprites"
 
 // Public types and API
 /**
@@ -80,6 +80,7 @@ export type GalaxyAPI = {
   getStats: () => { tokensPerSec: number; coresByLevel: number[]; totalEverCollected: number; currentFloatingData: number }
   getCosmeticsSettings?: () => { coreColors: string[]; ambientColors: string[]; coreSprites: string[]; unlockedSprites: string[]; specialEffects?: { rgbNeon?: boolean; customShift?: boolean; shiftSpeed?: number } }
   setCosmeticsSettings?: (settings: { coreColors: string[]; ambientColors: string[]; coreSprites: string[]; unlockedSprites: string[]; specialEffects?: { rgbNeon?: boolean; customShift?: boolean; shiftSpeed?: number } }) => void
+  clearSaveData?: () => boolean
   setTargetFps: (fps: number) => void
   getTargetFps: () => number
   setPerformanceMode: (lowQuality: boolean) => void
@@ -242,6 +243,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const lastTick = useRef<number>(0)
   const reducedMotion = useRef<boolean>(false)
   const autoAcc = useRef<number>(0)
+  // Unlockable large drifting sprites (click 10x to unlock)
+  type Unlockable = { id: string; x: number; y: number; vx: number; vy: number; size: number; clicks: number; clicksRequired: number; angle: number; av: number; shakeT: number; spinBoostT: number; seed: number; crackP: number; breaking: boolean; breakT: number; breakTotal: number }
+  const unlockables = useRef<Unlockable[]>([])
+  const nextUnlockSpawnAt = useRef<number>(0)
   const firstL2Notified = useRef<boolean>(false)
   const firstMaxNotified = useRef<boolean>(false)
   // Round-robin tracker for stacking target per level to distribute stacks
@@ -799,6 +804,71 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   }, [enabled])
 
   function simulate(dt: number) {
+    // Unlockable spawn/update system
+    try {
+      // derive cosmetics unlocked list from snapshot cache
+      const cos = (snapshot as any).currentCosmetics || null
+      const unlocked: string[] = Array.isArray(cos?.unlockedSprites) ? cos.unlockedSprites : ALL_SPRITE_IDS
+      const lockedPool = ALL_SPRITE_IDS.filter(id => !unlocked.includes(id))
+
+      // Update active unlockables
+      if (unlockables.current.length > 0) {
+        const margin = 96
+        for (let i = unlockables.current.length - 1; i >= 0; i--) {
+          const u = unlockables.current[i]
+          // Drift speed (slowed to 1.2x)
+          u.x += u.vx * dt * 1.2
+          u.y += u.vy * dt * 1.2
+          // advance rotation
+          let rotMul = 1
+          if (u.spinBoostT > 0) { rotMul += 2; u.spinBoostT = Math.max(0, u.spinBoostT - dt) }
+          u.angle += u.av * dt * rotMul
+          if (u.shakeT > 0) { u.shakeT = Math.max(0, u.shakeT - dt * 2) }
+          // advance break anim timers
+          if (u.breaking) {
+            u.breakT += dt
+            if (u.breakT >= u.breakTotal) {
+              // remove after break finishes
+              unlockables.current.splice(i, 1)
+              continue
+            }
+          }
+          if (u.x < -margin || u.x > worldW.current + margin || u.y < -margin || u.y > worldH.current + margin) {
+            unlockables.current.splice(i, 1)
+          }
+        }
+      }
+
+      // Schedule and spawn new unlockable if none active and some remain locked
+      const nowMs = performance.now()
+      if (unlockables.current.length === 0 && lockedPool.length > 0) {
+        if (nextUnlockSpawnAt.current === 0) {
+          // reduce spawn cadence: every ~1 minute
+          const minMs = 60 * 1000
+          const maxMs = 60 * 1000
+          nextUnlockSpawnAt.current = nowMs + (minMs + Math.random() * (maxMs - minMs))
+        } else if (nowMs >= nextUnlockSpawnAt.current) {
+          const spriteId = lockedPool[(Math.random() * lockedPool.length) | 0]
+          const edge = (Math.random() * 4) | 0 // 0=left,1=top,2=right,3=bottom
+          const speed = 40
+          let x = 0, y = 0, vx = 0, vy = 0
+          if (edge === 0) { x = -60; y = Math.random() * worldH.current; vx = speed; vy = (Math.random() - 0.5) * 10 }
+          else if (edge === 2) { x = worldW.current + 60; y = Math.random() * worldH.current; vx = -speed; vy = (Math.random() - 0.5) * 10 }
+          else if (edge === 1) { y = -60; x = Math.random() * worldW.current; vy = speed; vx = (Math.random() - 0.5) * 10 }
+          else { y = worldH.current + 60; x = Math.random() * worldW.current; vy = -speed; vx = (Math.random() - 0.5) * 10 }
+          const l5DotRadius = (5 + 5 * 2)
+          const size = l5DotRadius * 8
+          // random angular velocity in radians/sec; keep gentle spin
+          const av = (Math.random() * 0.6 + 0.2) * (Math.random() < 0.5 ? -1 : 1)
+          const seed = Math.random()
+          unlockables.current.push({ id: spriteId, x, y, vx, vy, size, clicks: 0, clicksRequired: 10, angle: 0, av, shakeT: 0, spinBoostT: 0, seed, crackP: 0, breaking: false, breakT: 0, breakTotal: 0.3 })
+          // schedule next spawn ~1 minute
+          const minMs = 60 * 1000
+          const maxMs = 60 * 1000
+          nextUnlockSpawnAt.current = nowMs + (minMs + Math.random() * (maxMs - minMs))
+        }
+      }
+    } catch {}
     // Drift and wrap
     const W = worldW.current
     const H = worldH.current
@@ -897,6 +967,13 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         // clustered moves with rigid orbit around moving core
         if (p.state === "clustered" && p.clusterId != null) {
           const c = clusters.current[p.clusterId]
+          if (!c) {
+            // Core no longer exists; fallback to ambient to avoid crashes
+            p.state = 'ambient'
+            p.clusterId = undefined
+            p.alpha = Math.random() * 0.3 + 0.18
+            continue
+          }
 
           // Use rigid orbital mathematics instead of physics-based movement
           const targetR = p.orbitR ?? 34
@@ -1395,21 +1472,21 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
     // 2. PRIORITY: Background ambient data (throttled as core total grows)
     let ambientCount = 0
-    // Use the peak core total reached to determine ambient quota
-    // New ramp: from 0->200 peak cores, drop to 20% linearly. From 200->1010, ease-out from 20% to 0.
-    const peakAmbient = maxTotalCores.current
-    let ambientFactor = 1
-    if (peakAmbient <= 0) {
-      ambientFactor = 1
-    } else if (peakAmbient < 200) {
-      ambientFactor = 1 - 0.8 * (peakAmbient / 200)
-    } else if (peakAmbient < 1010) {
-      const t = (peakAmbient - 200) / (1010 - 200)
-      const easeOut = 1 - Math.pow(1 - t, 2) // quadratic ease-out
-      ambientFactor = 0.2 * (1 - easeOut)
-    } else {
-      ambientFactor = 0
-    }
+      // Use the peak core total reached to determine ambient quota
+      // New ramp: from 0->200 peak cores, drop to 20% linearly. From 200->1010, ease-out from 20% to 0.
+      const peakAmbient = maxTotalCores.current
+      let ambientFactor = 1
+      if (peakAmbient <= 0) {
+        ambientFactor = 1
+      } else if (peakAmbient < 200) {
+        ambientFactor = 1 - 0.8 * (peakAmbient / 200)
+      } else if (peakAmbient < 1010) {
+        const t = (peakAmbient - 200) / (1010 - 200)
+        const easeOut = 1 - Math.pow(1 - t, 2) // quadratic ease-out
+        ambientFactor = 0.2 * (1 - easeOut)
+      } else {
+        ambientFactor = 0
+      }
     const maxAmbient = Math.max(0, Math.floor(availableForData * 0.6 * ambientFactor))
     for (let i = 0; i < points.current.length && ambientCount < maxAmbient; i++) {
       const p = points.current[i]
@@ -1472,6 +1549,30 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
     // 4. PRIORITY: Always render cores (most critical for gameplay!)
     let coreBaseRecordsDrawn = 0 // count only halo+dot pairs against reserved core budget
+    // 3b. Render unlockables first (so they appear beneath core detail)
+    if (unlockables.current.length > 0) {
+      for (let i = 0; i < unlockables.current.length; i++) {
+        if (n >= drawBuffer.length - 6) break
+        const u = unlockables.current[i]
+        const rec = drawBuffer[n++]
+        rec.x = u.x
+        rec.y = u.y
+        // Shrink to 80% visual scale
+        rec.radius = Math.max(24, u.size * 0.5 * 0.8)
+        rec.alpha = 0.95
+        rec.color = GAME_CONFIG.LEVEL_COLOR_INDEX[4] || 9
+        rec.shape = 'unlock' as any
+        ;(rec as any).spriteId = u.id
+        ;(rec as any).angle = u.angle
+        ;(rec as any).shake = u.shakeT
+        ;(rec as any).seed = u.seed
+        ;(rec as any).crackP = u.crackP
+        ;(rec as any).breaking = u.breaking
+        ;(rec as any).breakT = u.breakT
+        ;(rec as any).breakTotal = u.breakTotal
+        rec.glow = 1.0
+      }
+    }
     for (let i = 0; i < clusters.current.length; i++) {
       const c = clusters.current[i]
       if (c.isVisible === false) continue // Skip stacked/hidden cores
@@ -1624,11 +1725,158 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           }
           ctx.restore()
         }
-        // Draw in order; halos as circles, cores as CPU icons, others as page icons
+        // Draw in order; halos as circles, unlockables, cores as sprites, others as page icons
         for (let i = 0; i < snap.points.length; i++) {
           const r = snap.points[i]
           const COLORS = getColors()
           let color = COLORS[r.color] || COLORS[0]
+          // Unlockables (render before halos/cores/pages)
+          if ((r as any).shape === 'unlock') {
+            const cx = r.x, cy = r.y
+            const size = r.radius * 1.7
+            const spriteId = (r as any).spriteId as string
+            // draw as big tinted glyph or shape
+            ctx.save()
+            ctx.globalAlpha = r.alpha
+            // dynamic color via special effects (prefer current special settings)
+            const tSec = performance.now() * 0.001
+            const shifted = applySpecialColor(5, color, tSec)
+            ctx.fillStyle = shifted
+            ctx.strokeStyle = shifted
+            // apply rotation about center
+            const ang = (r as any).angle || 0
+            const shake = (r as any).shake || 0
+            const seed = (r as any).seed || 0
+            // position jitter on click
+            if (shake > 0) {
+              const t = performance.now() * 0.02
+              const jx = (Math.sin(t + seed * 13.3) * 2 + Math.sin(t * 1.7 + seed * 7.9) * 1.5) * (shake * 6)
+              const jy = (Math.cos(t * 1.3 + seed * 3.1) * 2 + Math.cos(t * 1.9 + seed * 11.1) * 1.2) * (shake * 6)
+              ctx.translate(jx, jy)
+            }
+            if (ang !== 0) { ctx.translate(cx, cy); ctx.rotate(ang); ctx.translate(-cx, -cy) }
+            // soft pulsing glow behind the unlockable
+            {
+              const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.004 + seed * 6.28)
+              const glowR = size * 1.5
+              const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
+              grad.addColorStop(0, shifted)
+              grad.addColorStop(1, shifted + '00')
+              ctx.save()
+              ctx.globalAlpha = 0.25 + 0.25 * pulse
+              ctx.fillStyle = grad
+              ctx.beginPath(); ctx.arc(cx, cy, glowR, 0, Math.PI * 2); ctx.fill()
+              ctx.restore()
+            }
+            // reuse small shape render logic inline with crack overlay
+            if (spriteId === 'circle' || spriteId === 'ring') {
+              const radius = size * 0.5
+              ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+              if (spriteId === 'ring') ctx.stroke(); else ctx.fill()
+            } else if (spriteId === 'square') {
+              const s = size * 0.9
+              ctx.fillRect(cx - s/2, cy - s/2, s, s)
+            } else if (spriteId === 'star') {
+              const spikes = 5
+              const outerR = size * 0.5
+              const innerR = outerR * 0.5
+              let rot = Math.PI / 2 * 3
+              let x = cx, y = cy
+              ctx.beginPath(); ctx.moveTo(cx, cy - outerR)
+              for (let j = 0; j < spikes; j++) {
+                x = cx + Math.cos(rot) * outerR; y = cy + Math.sin(rot) * outerR; ctx.lineTo(x, y); rot += Math.PI / spikes
+                x = cx + Math.cos(rot) * innerR; y = cy + Math.sin(rot) * innerR; ctx.lineTo(x, y); rot += Math.PI / spikes
+              }
+              ctx.closePath(); ctx.fill()
+            } else if (spriteId === 'triangle') {
+              const r2 = size * 0.55
+              ctx.beginPath(); ctx.moveTo(cx, cy - r2); ctx.lineTo(cx - r2 * 0.87, cy + r2 * 0.5); ctx.lineTo(cx + r2 * 0.87, cy + r2 * 0.5); ctx.closePath(); ctx.fill()
+            } else if (spriteId === 'diamond_shape') {
+              const r2 = size * 0.6
+              ctx.beginPath(); ctx.moveTo(cx, cy - r2); ctx.lineTo(cx + r2, cy); ctx.lineTo(cx, cy + r2); ctx.lineTo(cx - r2, cy); ctx.closePath(); ctx.fill()
+            } else if (spriteId === 'hexagon') {
+              const r2 = size * 0.5
+              ctx.beginPath(); for (let j = 0; j < 6; j++) { const a = (Math.PI/3)*j - Math.PI/6; const x = cx + Math.cos(a)*r2; const y = cy + Math.sin(a)*r2; if (j===0) ctx.moveTo(x,y); else ctx.lineTo(x,y) } ctx.closePath(); ctx.fill()
+            } else if (spriteId === 'plus') {
+              const w = size * 0.18; const l = size * 0.5
+              ctx.fillRect(cx - w/2, cy - l, w, l * 2); ctx.fillRect(cx - l, cy - w/2, l * 2, w)
+            } else if (spriteId === 'pentagon') {
+              const r2 = size * 0.5
+              ctx.beginPath();
+              for (let k = 0; k < 5; k++) { const a = (Math.PI*2*k)/5 - Math.PI/2; const x = cx + Math.cos(a)*r2; const y = cy + Math.sin(a)*r2; if (k===0) ctx.moveTo(x,y); else ctx.lineTo(x,y) }
+              ctx.closePath(); ctx.fill()
+            } else if (spriteId === 'octagon') {
+              const r2 = size * 0.5
+              ctx.beginPath();
+              for (let k = 0; k < 8; k++) { const a = (Math.PI*2*k)/8 - Math.PI/8; const x = cx + Math.cos(a)*r2; const y = cy + Math.sin(a)*r2; if (k===0) ctx.moveTo(x,y); else ctx.lineTo(x,y) }
+              ctx.closePath(); ctx.fill()
+            } else if (spriteId === 'chevron') {
+              const w = size * 0.9; const h = size * 0.6; const t = Math.max(2, size * 0.12)
+              const x0 = cx - w/2; const y0 = cy - h/2
+              ctx.beginPath()
+              ctx.moveTo(x0, y0)
+              ctx.lineTo(x0 + w*0.6, y0 + h/2)
+              ctx.lineTo(x0, y0 + h)
+              ctx.lineTo(x0 + t, y0 + h)
+              ctx.lineTo(x0 + w*0.6 + t, y0 + h/2)
+              ctx.lineTo(x0 + t, y0)
+              ctx.closePath(); ctx.fill()
+            } else {
+              // emoji fallback
+          const glyph = (SPRITE_EMOJI as any)[spriteId] || '✨'
+              ctx.save()
+              ctx.globalAlpha = 1
+              ctx.fillStyle = '#ffffff'
+              ctx.font = `${Math.max(10, size)}px serif`
+              ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+              ctx.fillText(glyph, cx, cy)
+              ctx.globalCompositeOperation = 'source-atop'; ctx.globalAlpha = 0.45; ctx.fillStyle = color
+              ctx.beginPath(); ctx.arc(cx, cy, size * 0.6, 0, Math.PI * 2); ctx.fill()
+              ctx.restore()
+            }
+            // draw crack overlay proportional to crackP
+            {
+              const crackP = (r as any).crackP || 0
+              const breaking = !!(r as any).breaking
+              const breakT = (r as any).breakT || 0
+              const breakTotal = (r as any).breakTotal || 0.3
+              if (crackP > 0) {
+                ctx.save()
+                ctx.globalAlpha = Math.min(0.75, 0.25 + crackP * 0.6)
+                ctx.strokeStyle = '#ffffff'
+                ctx.lineWidth = Math.max(1, size * 0.03)
+                // simple starburst cracks
+                const rays = 6
+                const baseR = size * 0.5
+                for (let k = 0; k < rays; k++) {
+                  const a = (Math.PI * 2 * k) / rays + (seed * 10)
+                  const len = baseR * (0.3 + crackP * 0.7) * (0.6 + Math.sin(k * 1.3 + seed * 5) * 0.15)
+                  ctx.beginPath()
+                  ctx.moveTo(cx, cy)
+                  ctx.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len)
+                  ctx.stroke()
+                }
+                ctx.restore()
+              }
+              if (breaking && breakT > 0) {
+                // shatter fragments scaling out during break
+                const t = Math.min(1, breakT / breakTotal)
+                const frag = 5
+                ctx.save()
+                ctx.globalAlpha = 0.8 * (1 - t)
+                for (let k = 0; k < frag; k++) {
+                  const a = (Math.PI * 2 * k) / frag + seed * 8
+                  const d = size * (0.4 + t * 1.2)
+                  const fx = cx + Math.cos(a) * d
+                  const fy = cy + Math.sin(a) * d
+                  ctx.beginPath(); ctx.arc(fx, fy, Math.max(1.5, size * 0.08 * (1 - t)), 0, Math.PI * 2); ctx.fill()
+                }
+                ctx.restore()
+              }
+            }
+            ctx.restore()
+            continue
+          }
           if (r.shape === 'halo') {
             // Create radial gradient for proper glowing halo effect
             const gradient = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, r.radius)
@@ -1653,9 +1901,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
             // If a non-database sprite is selected, render shape/emoji
             if (spriteId && spriteId !== 'database') {
-              const sizeBase = r.radius * 2.6
+            const sizeBase = r.radius * 2.6
               const sizeScale = level === 1 ? 1.18 : level === 2 ? 1.12 : level === 3 ? 1.06 : 1.0
-              const size = sizeBase * sizeScale
+            const size = sizeBase * sizeScale
               const cx = r.x, cy = r.y
 
               ctx.save()
@@ -1730,6 +1978,27 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
                 const l = size * 0.5
                 ctx.fillRect(cx - w/2, cy - l, w, l * 2)
                 ctx.fillRect(cx - l, cy - w/2, l * 2, w)
+              } else if (spriteId === 'pentagon') {
+                const r2 = size * 0.5
+                ctx.beginPath()
+                for (let i = 0; i < 5; i++) { const a = (Math.PI*2*i)/5 - Math.PI/2; const x = cx + Math.cos(a)*r2; const y = cy + Math.sin(a)*r2; if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y) }
+                ctx.closePath(); ctx.fill()
+              } else if (spriteId === 'octagon') {
+                const r2 = size * 0.5
+                ctx.beginPath()
+                for (let i = 0; i < 8; i++) { const a = (Math.PI*2*i)/8 - Math.PI/8; const x = cx + Math.cos(a)*r2; const y = cy + Math.sin(a)*r2; if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y) }
+                ctx.closePath(); ctx.fill()
+              } else if (spriteId === 'chevron') {
+                const w = size * 0.9; const h = size * 0.6; const t = Math.max(2, size * 0.12)
+                const x0 = cx - w/2; const y0 = cy - h/2
+                ctx.beginPath()
+                ctx.moveTo(x0, y0)
+                ctx.lineTo(x0 + w*0.6, y0 + h/2)
+                ctx.lineTo(x0, y0 + h)
+                ctx.lineTo(x0 + t, y0 + h)
+                ctx.lineTo(x0 + w*0.6 + t, y0 + h/2)
+                ctx.lineTo(x0 + t, y0)
+                ctx.closePath(); ctx.fill()
               } else {
                 // Fallback to emoji glyphs (tinted)
                 const glyph = (SPRITE_EMOJI as any)[spriteId] || '✨'
@@ -1750,7 +2019,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
               continue
             }
 
-            // Database cylinder icon with 1..5 segments based on variant (core level)
+              // Database cylinder icon with 1..5 segments based on variant (core level)
             // Simplified lines with curved separators; cylinder height grows with level.
             const glowFrac = Math.max(0, Math.min(1, r.glow || 0))
             const segments = Math.max(1, Math.min(5, (r.variant ?? 1)))
@@ -1758,10 +2027,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
             const sizeBase = r.radius * 2.6
             const sizeScale = segments === 1 ? 1.18 : segments === 2 ? 1.12 : segments === 3 ? 1.06 : 1.0
             const size = sizeBase * sizeScale // base size adjusted by level
-            const halfW = size * 0.55
-            const segH = Math.max(2, size * 0.28) // constant per-segment height → total height scales with level
-            const totalH = segH * segments
-            const ellH = Math.max(2, segH * 0.8) // more pronounced curvature on caps
+              const halfW = size * 0.55
+              const segH = Math.max(2, size * 0.28) // constant per-segment height → total height scales with level
+              const totalH = segH * segments
+              const ellH = Math.max(2, segH * 0.8) // more pronounced curvature on caps
 
             // Prep transform for wobble (slight left-right rotation)
             const cx = r.x, cy = r.y
@@ -1810,8 +2079,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
             // Body fill (single rect spanning all segments) with very light vertical gradient
             const bodyGrad = ctx.createLinearGradient(0, topY, 0, bottomY)
-            bodyGrad.addColorStop(0, shade(color, 0.06))
-            bodyGrad.addColorStop(1, shade(color, -0.06))
+              bodyGrad.addColorStop(0, shade(color, 0.06))
+              bodyGrad.addColorStop(1, shade(color, -0.06))
             ctx.fillStyle = bodyGrad
             ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
             ctx.fillRect(left, topY, halfW * 2, totalH)
@@ -1849,8 +2118,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
               // Tint intensity: higher segments slightly lighter
               const p = 0.05 - (segments > 1 ? (s / (segments - 1)) * 0.1 : 0)
               const grad = ctx.createLinearGradient(0, y0, 0, y1)
-              grad.addColorStop(0, shade(color, p + 0.03))
-              grad.addColorStop(1, shade(color, p - 0.03))
+                grad.addColorStop(0, shade(color, p + 0.03))
+                grad.addColorStop(1, shade(color, p - 0.03))
               ctx.globalAlpha = 0.4
               ctx.fillStyle = grad
               ctx.fillRect(left + 1, y0 + 1, halfW * 2 - 2, segH - 2)
@@ -1872,13 +2141,13 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
               ctx.globalAlpha = 1
             }
 
-            // Right-side subtle highlight
-            ctx.globalAlpha = 0.16
-            ctx.fillStyle = '#ffffff'
-            const hiW = Math.max(1, Math.floor(size * 0.05))
-            ctx.fillRect(right - hiW, topY + 2, Math.max(1, Math.floor(size * 0.035)), totalH - 4)
-            ctx.globalAlpha = 1
-            ctx.restore()
+              // Right-side subtle highlight
+              ctx.globalAlpha = 0.16
+              ctx.fillStyle = '#ffffff'
+              const hiW = Math.max(1, Math.floor(size * 0.05))
+              ctx.fillRect(right - hiW, topY + 2, Math.max(1, Math.floor(size * 0.035)), totalH - 4)
+              ctx.globalAlpha = 1
+              ctx.restore()
             continue
           }
           // Page icon with sharp corners + diagonal fold line + scribbles
@@ -1970,9 +2239,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         const raw = localStorage.getItem("galaxy.cosmetics")
         if (raw) {
           const saved = JSON.parse(raw)
-          // Ensure unlockedSprites contains any newly added IDs so they appear in the panel
+          // Ensure unlockedSprites exists and excludes our default-locked testing set
           const list = Array.isArray(saved?.unlockedSprites) ? saved.unlockedSprites : []
-          const merged = Array.from(new Set([...(list || []), ...ALL_SPRITE_IDS]))
+          const baseline = saved?.strictLocked ? ['database'] : ALL_SPRITE_IDS.filter(id => !DEFAULT_LOCKED_SPRITES.includes(id))
+          const merged = Array.from(new Set([...(list || []), ...baseline]))
           saved.unlockedSprites = merged
           return saved
         }
@@ -1982,7 +2252,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
         ambientColors: ["#e5e7eb"],
         coreSprites: ['database','database','database','database','database'],
-        unlockedSprites: [...ALL_SPRITE_IDS],
+        // Unlock all except default-locked test sprites
+        unlockedSprites: ALL_SPRITE_IDS.filter(id => !DEFAULT_LOCKED_SPRITES.includes(id)),
         specialEffects: { rgbNeon: false, customShift: false, shiftSpeed: 1.0 }
       }
     },
@@ -2007,6 +2278,79 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       try { setPerformanceModeState(next) } catch {}
     },
     getPerformanceMode() { return lowQualityMode.current },
+    clearSaveData() {
+      try {
+        // Clear storage
+        localStorage.removeItem('galaxy.tokens')
+        localStorage.removeItem('galaxy.iq')
+        localStorage.removeItem('galaxy.upgrades')
+        localStorage.removeItem('galaxy.iqUpgrades')
+        localStorage.removeItem('galaxy.coreData')
+        localStorage.removeItem('galaxy.totalEverCollected')
+        // Lock sprites except database; reset cosmetics
+        const resetCosmetics = {
+          coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
+          ambientColors: ["#e5e7eb"],
+          coreSprites: ['database','database','database','database','database'],
+          unlockedSprites: ['database'],
+          specialEffects: { rgbNeon: false, customShift: false, shiftSpeed: 1.0 },
+          strictLocked: true,
+        } as any
+        localStorage.setItem('galaxy.cosmetics', JSON.stringify(resetCosmetics))
+
+        // Reset in-memory
+        // Reset unlockables and timers
+        unlockables.current = []
+        nextUnlockSpawnAt.current = 0
+
+        clusters.current = []
+        // Add a single L1 core
+        const newCluster: Cluster = {
+          id: 0,
+          x: 50 + Math.random() * Math.max(0, worldW.current - 100),
+          y: 50 + Math.random() * Math.max(0, worldH.current - 100),
+          vx: 0, vy: 0,
+          members: 0,
+          radius: 10,
+          emitTimer: rand(PULSE_MIN, PULSE_MAX),
+          flashT: 0,
+          webIndices: [],
+          level: 1,
+          progress: 0,
+          colorIndex: LEVEL_COLOR_INDEX[0] || 5,
+          stackCount: 1,
+          isVisible: true,
+          scaleMultiplier: 1.0,
+        }
+        clusters.current.push(newCluster)
+        // Reset all points to ambient and clear cluster references
+        for (let i = 0; i < points.current.length; i++) {
+          const p = points.current[i]
+          p.state = 'ambient'
+          p.clusterId = undefined
+          p.alpha = Math.random() * 0.3 + 0.18
+        }
+        if (persisted.current) {
+          persisted.current.tokens = 0
+          persisted.current.iq = 0
+          persisted.current.upgrades = { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0, dataQuality: 0 }
+          persisted.current.iqUpgrades = { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false }
+          persisted.current.totalEverCollected = 0
+        }
+        setUiState(s => ({
+          ...s,
+          tokens: 0,
+          iq: 0,
+          upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0, dataQuality: 0 },
+          iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
+          cosmetics: resetCosmetics,
+        }))
+        return true
+      } catch (e) {
+        console.warn('Failed to clear save data:', e)
+        return false
+      }
+    },
     purchaseIQ(key) {
       if (!persisted.current) return
       // Input validation
@@ -2069,6 +2413,51 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         console.warn('Click coordinates out of bounds:', { x, y, worldW: worldW.current, worldH: worldH.current })
         return
       }
+      // Unlockable click detection has priority
+      if (unlockables.current.length > 0) {
+        for (let i = unlockables.current.length - 1; i >= 0; i--) {
+          const u = unlockables.current[i]
+          const dx = u.x - x
+          const dy = u.y - y
+          const r = (u.size || 40) * 0.6
+          if (dx * dx + dy * dy <= r * r) {
+            u.clicks += 1
+            // click feedback: brief shake and spin burst
+            u.shakeT = 0.2
+            u.spinBoostT = 0.25
+            // increase cracking progress proportionally
+            const inc = 1 / (u.clicksRequired || 10)
+            u.crackP = Math.min(1, u.crackP + inc)
+            // Persist unlock when threshold reached
+            const cosRaw = localStorage.getItem('galaxy.cosmetics')
+            let cos = null
+            try { cos = cosRaw ? JSON.parse(cosRaw) : null } catch {}
+            const list: string[] = Array.isArray(cos?.unlockedSprites) ? cos.unlockedSprites : []
+            if (u.clicks >= u.clicksRequired && !list.includes(u.id)) {
+              // initiate break animation
+              u.breaking = true
+              u.breakT = 0
+              u.breakTotal = 0.35
+              const merged = Array.from(new Set([...list, u.id]))
+              const updated: any = { ...(cos || {}), unlockedSprites: merged }
+              if (!Array.isArray(updated.coreColors)) updated.coreColors = ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"]
+              if (!Array.isArray(updated.ambientColors)) updated.ambientColors = ["#e5e7eb"]
+              if (!Array.isArray(updated.coreSprites) || updated.coreSprites.length < 5) updated.coreSprites = ['database','database','database','database','database']
+              if (!updated.specialEffects) updated.specialEffects = { rgbNeon: false, customShift: false, shiftSpeed: 1.0 }
+              try { localStorage.setItem('galaxy.cosmetics', JSON.stringify(updated)) } catch {}
+              ;(snapshot as any).currentCosmetics = updated
+              // Immediately reflect unlocks in UI state so panel updates without refresh
+              try { setUiState(s => ({ ...s, cosmetics: updated })) } catch {}
+              // Fire toast event with unlocked name
+              const def = ALL_SPRITES.find(s => s.id === u.id)
+              const name = def?.name || u.id
+              try { window.dispatchEvent(new CustomEvent('galaxy-toast', { detail: { message: `Unlocked: ${name}`, kind: 'unlock', ms: 3000 } })) } catch {}
+            }
+            return
+          }
+        }
+      }
+
       // Force fresh outlier count calculation to avoid stale state
       let outlierCount = 0
       for (let i = 0; i < points.current.length; i++) {

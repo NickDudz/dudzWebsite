@@ -25,6 +25,7 @@ export default function Page() {
   const [showInstr, setShowInstr] = useState(false)
   const [showFpsCounter, setShowFpsCounter] = useState(false)
   const [showPanelsHint, setShowPanelsHint] = useState(false)
+  const [unlockToast, setUnlockToast] = useState<string | null>(null)
   const [cosmeticsVisible, setCosmeticsVisible] = useState(false)
   const lagFactor = 0.05 // Smoother interpolation for parallax
 
@@ -52,8 +53,20 @@ export default function Page() {
   // Disable tutorial-related event responses
   useEffect(() => {
     const onFx = () => {}
+    const onToast = (e: any) => {
+      const msg = e?.detail?.message as string
+      if (msg) {
+        setUnlockToast(msg)
+        const ms = Math.max(500, Math.min(10000, e?.detail?.ms || 3000))
+        setTimeout(() => setUnlockToast(null), ms)
+      }
+    }
     window.addEventListener('galaxy-effect' as any, onFx as any)
-    return () => window.removeEventListener('galaxy-effect' as any, onFx as any)
+    window.addEventListener('galaxy-toast' as any, onToast as any)
+    return () => {
+      window.removeEventListener('galaxy-effect' as any, onFx as any)
+      window.removeEventListener('galaxy-toast' as any, onToast as any)
+    }
   }, [])
 
   // Throttle star parallax to target FPS (default 30)
@@ -125,9 +138,9 @@ export default function Page() {
         className="fixed top-16 left-4 z-40 pointer-events-none"
       />
 
-      <div className="relative z-[20] mx-auto max-w-6xl px-4 pb-20 pt-6 sm:px-6 lg:px-8">
-        <div className={`mb-4 flex items-center justify-between gap-4 ${hudSidebar ? 'pr-[0px] sm:pr-[24rem]' : ''} ${galaxyOn ? 'pr-[200px] sm:pr-[240px]' : ''}`}>
-          <div className="flex items-center gap-4">
+      <div className="relative z-[20] mx-auto max-w-6xl px-4 pb-20 pt-6 sm:px-6 lg:px-8 pointer-events-none">
+        <div className={`mb-4 flex items-center justify-between gap-4 ${hudSidebar ? 'pr-[0px] sm:pr-[24rem]' : ''} ${galaxyOn ? 'pr-[200px] sm:pr-[240px]' : ''} pointer-events-none`}>
+          <div className="flex items-center gap-4 pointer-events-auto">
             <div className="flex items-center gap-3">
               <a
                 href="mailto:nick@dudz.pro"
@@ -188,7 +201,7 @@ export default function Page() {
 
           {/* Expand Game Button - Center */}
           {panelsOn && (
-            <div className="absolute left-1/2 transform -translate-x-1/2">
+            <div className="absolute left-1/2 transform -translate-x-1/2 pointer-events-auto">
               <motion.button
                 onClick={() => { setPanelsOn(false); setShowPanelsHint(true); setTimeout(() => setShowPanelsHint(false), 5000) }}
                 whileHover={{ scale: 1.02 }}
@@ -206,8 +219,14 @@ export default function Page() {
 
           {/* Toast hint for re-enabling panels */}
           {showPanelsHint && (
-            <div className="fixed top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1.5 rounded border border-zinc-700/60 bg-zinc-900/80 text-[11px] text-zinc-200 backdrop-blur">
+            <div className="fixed top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1.5 rounded border border-zinc-700/60 bg-zinc-900/80 text-[11px] text-zinc-200 backdrop-blur pointer-events-none">
               Panels can be re-enabled in Settings.
+            </div>
+          )}
+
+          {unlockToast && (
+            <div className="fixed top-10 left-1/2 -translate-x-1/2 z-40 px-3 py-1.5 rounded border border-emerald-600/60 bg-emerald-600/20 text-[11px] text-emerald-200 backdrop-blur shadow-[0_0_18px_rgba(16,185,129,0.35)] pointer-events-none">
+              {unlockToast}
             </div>
           )}
 
@@ -215,16 +234,18 @@ export default function Page() {
         </div>
 
         {/* HUD right side; collapsible */}
-        <GalaxyUI 
-          state={galaxy.state} 
-          api={galaxy.api} 
-          onToggle={() => setGalaxyOn(v => !v)} 
-          enabled={galaxyOn} 
-          collapsed={hudCollapsed} 
-          onCollapsedChange={setHudCollapsed}
-          sidebar={hudSidebar}
-          onSidebarToggle={() => setHudSidebar(v => !v)}
-        />
+        <div className="pointer-events-auto">
+          <GalaxyUI 
+            state={galaxy.state} 
+            api={galaxy.api} 
+            onToggle={() => setGalaxyOn(v => !v)} 
+            enabled={galaxyOn} 
+            collapsed={hudCollapsed} 
+            onCollapsedChange={setHudCollapsed}
+            sidebar={hudSidebar}
+            onSidebarToggle={() => setHudSidebar(v => !v)}
+          />
+        </div>
 
         {panelsOn && (
           <>
