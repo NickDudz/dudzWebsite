@@ -74,6 +74,35 @@ UI Listener (already wired in `app/page.tsx`): shows a non-interactive toast nea
 - Toasts: `pointer-events: none` to never block clicks.
 - HUD (GalaxyUI): dropdown/sidebar containers explicitly `pointer-events: auto`.
 
+## Mobile Adjustments & Density Capping
+
+We now use a lightweight device profile and a density-aware cap to keep ambient background data from cluttering small screens and to scale with window size on desktop:
+
+- Device profile (`isMobileRef`):
+  - Detected via viewport width (≤ 820px) or mobile UA. Updated on resize.
+  - File: `hooks/useClusteringGalaxy.ts` (near top, alongside `enabledRef`).
+
+- Density-aware ambient cap:
+  - Applied for all devices (desktop and mobile) so resizing the window adjusts density.
+  - Computation (in `buildSnapshot()`):
+    - `area = W * H`
+    - `targetDensity = isMobile ? 0.00003 : 0.00008` (points per pixel)
+    - `densityCap = floor(area * targetDensity)`
+    - `maxAmbient = min(densityCap, floor(availableForData * 0.6 * ambientFactor))`
+  - Tuning guidance:
+    - Increase `targetDensity` to show more ambient points; decrease to reduce clutter.
+    - Consider adding a Settings toggle to override `isMobileRef.current` for testing.
+
+- Swirl coverage and speed (unchanged rules):
+  - Coverage: `coverage = clamp(peakTotalCores / 200, 0, 1)` controls what fraction swirls.
+  - Speed: `s = clamp(peakTotalCores / 1010, 0, 1)` ramps angular speed.
+  - Only points with `seed <= coverage` swirl; others remain mostly in place.
+
+Adding future mobile-only fixes:
+- Prefer checking `isMobileRef.current` where logic should diverge.
+- Keep the default path optimized for desktop; add smaller constants or skips under `isMobileRef` (e.g., fewer web lines, reduced glow, lower orbiting-per-core).
+- If user-facing, add a Settings switch that flips a `forceMobileTuning` flag read in the hook instead of guessing from UA/width.
+
 ## Hydration Notes
 
 Third-party extensions (e.g., Dark Reader) inject attributes causing SSR/CSR mismatches. We suppress warnings on:
