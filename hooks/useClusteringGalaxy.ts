@@ -131,6 +131,14 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     }
   }, [])
 
+  // Consistent central clear zone radius (as fraction of min viewport dimension)
+  function getClearRadius(): number {
+    const w = worldW.current || (typeof window !== 'undefined' ? window.innerWidth : 1200)
+    const h = worldH.current || (typeof window !== 'undefined' ? window.innerHeight : 800)
+    const frac = 0.2 // 20% gives a more noticeable center hole across devices
+    return Math.min(w, h) * frac
+  }
+
   // Constants (initial balancing in BALANCING.md)
   const {
     PASSIVE_BASE,
@@ -953,6 +961,22 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         // Coverage: gradually increase the fraction of ambient points affected from 0 at 10 cores
         // to 100% at 200 peak cores. Speed still ramps from 10 -> 1010 and remains 10x slower overall.
         if (p.state === "ambient" && !reducedMotion.current) {
+          // Maintain a consistent central clear zone across devices
+          {
+            const cx = worldW.current * 0.5
+            const cy = worldH.current * 0.5
+            const dx = p.x - cx
+            const dy = p.y - cy
+            const r = Math.sqrt(dx * dx + dy * dy) + 1e-6
+            const clearR = getClearRadius()
+            if (r < clearR) {
+              // Stronger radial push to ensure clearing is visible
+              const push = Math.max(40, (clearR - r) * 1.25) // px/sec
+              const ux = dx / r, uy = dy / r
+              p.x += ux * push * dt
+              p.y += uy * push * dt
+            }
+          }
           const peak = maxTotalCores.current
           // Fraction of ambient affected by swirl: 0 -> 200 cores maps to 0 -> 1
           const coverage = Math.max(0, Math.min(1, peak / 200))
