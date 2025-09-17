@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
+import { ALL_SPRITES, SPRITE_EMOJI } from "../constants/sprites"
 
 export type CosmeticsSettings = {
   coreColors: string[] // L1-L5 core colors
@@ -11,6 +12,7 @@ export type CosmeticsSettings = {
   specialEffects: {
     rgbNeon: boolean
   }
+  unlockedSprites?: string[]
 }
 
 export type CosmeticsPanelProps = {
@@ -59,6 +61,7 @@ const DEFAULT_AMBIENT_COLORS = ["#e5e7eb"]
 
 export default function CosmeticsPanel({ visible, onToggle, settings, onSettingsChange, unlocked }: CosmeticsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>('palette')
+  const [activeSlot, setActiveSlot] = useState<number>(0) // 0..4 selection for L1..L5
   // Centralized picker state so it cannot be lost on child remounts
   const [openPicker, setOpenPicker] = useState<null | {
     group: 'core' | 'ambient'
@@ -105,6 +108,113 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
       try { localStorage.setItem('cosmetics.recentColors', JSON.stringify(next)) } catch {}
       return next
     })
+  }
+
+  // Mini sprite preview renderer for panel buttons (SVG for drawn shapes; emoji fallback)
+  const SpritePreview = ({ id, size = 18 }: { id: string; size?: number }) => {
+    const s = size
+    const half = s / 2
+    const stroke = 'currentColor'
+    const fill = 'currentColor'
+
+    const starPath = () => {
+      const spikes = 5
+      const outerR = s * 0.45
+      const innerR = outerR * 0.5
+      let rot = Math.PI / 2 * 3
+      let x = half
+      let y = half
+      const points: string[] = []
+      points.push(`${half},${half - outerR}`)
+      for (let i = 0; i < spikes; i++) {
+        x = half + Math.cos(rot) * outerR
+        y = half + Math.sin(rot) * outerR
+        points.push(`${x},${y}`)
+        rot += Math.PI / spikes
+        x = half + Math.cos(rot) * innerR
+        y = half + Math.sin(rot) * innerR
+        points.push(`${x},${y}`)
+        rot += Math.PI / spikes
+      }
+      return points.join(' ')
+    }
+
+    if (id === 'circle') {
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <circle cx={half} cy={half} r={s * 0.45} fill={fill} />
+        </svg>
+      )
+    }
+    if (id === 'ring') {
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <circle cx={half} cy={half} r={s * 0.45} fill="none" stroke={stroke} strokeWidth={Math.max(1, Math.floor(s * 0.12))} />
+        </svg>
+      )
+    }
+    if (id === 'square') {
+      const side = s * 0.82
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <rect x={half - side / 2} y={half - side / 2} width={side} height={side} fill={fill} rx={Math.max(1, s * 0.08)} />
+        </svg>
+      )
+    }
+    if (id === 'triangle') {
+      const r = s * 0.48
+      const p1 = `${half},${half - r}`
+      const p2 = `${half - r * 0.866},${half + r * 0.5}`
+      const p3 = `${half + r * 0.866},${half + r * 0.5}`
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <polygon points={`${p1} ${p2} ${p3}`} fill={fill} />
+        </svg>
+      )
+    }
+    if (id === 'diamond_shape') {
+      const r = s * 0.48
+      const p = `${half},${half - r} ${half + r},${half} ${half},${half + r} ${half - r},${half}`
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <polygon points={p} fill={fill} />
+        </svg>
+      )
+    }
+    if (id === 'hexagon') {
+      const r = s * 0.48
+      const pts: string[] = []
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 6
+        const x = half + Math.cos(a) * r
+        const y = half + Math.sin(a) * r
+        pts.push(`${x},${y}`)
+      }
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <polygon points={pts.join(' ')} fill={fill} />
+        </svg>
+      )
+    }
+    if (id === 'star') {
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <polygon points={starPath()} fill={fill} />
+        </svg>
+      )
+    }
+    if (id === 'plus') {
+      const w = s * 0.18
+      const l = s * 0.5
+      return (
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden>
+          <rect x={half - w / 2} y={half - l} width={w} height={l * 2} fill={fill} />
+          <rect x={half - l} y={half - w / 2} width={l * 2} height={w} fill={fill} />
+        </svg>
+      )
+    }
+    // Fallback: emoji-based preview
+    return <span style={{ fontSize: s * 0.9, lineHeight: 1 }}>{SPRITE_EMOJI[id] || '✨'}</span>
   }
 
   if (!unlocked) return null
@@ -240,18 +350,69 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
 
               {activeTab === 'sprites' && (
                 <div className="space-y-4">
-                  {[1, 2, 3, 4, 5].map((level) => (
-                    <SpriteSelector
-                      key={level}
-                      selectedId={settings.coreSprites[level - 1] || 'database'}
-                      onChange={(id) => {
-                        const newSprites = [...settings.coreSprites]
-                        newSprites[level - 1] = id
-                        onSettingsChange({ ...settings, coreSprites: newSprites })
-                      }}
-                      level={level}
-                    />
-                  ))}
+                  {/* Selected sprites L1-L5 */}
+                  <div>
+                    <h3 className="text-[12px] font-semibold text-zinc-300 mb-2">Selected Sprites</h3>
+                    <div className="grid grid-cols-5 gap-2">
+                      {[0,1,2,3,4].map(i => {
+                        const id = settings.coreSprites[i] || 'database'
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => setActiveSlot(i)}
+                            className={`flex flex-col items-center gap-1 px-2 py-2 rounded border text-center transition-colors ${activeSlot === i ? 'border-blue-500/60 bg-blue-500/10 text-blue-200' : 'border-zinc-700/60 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-700/40'}`}
+                            aria-pressed={activeSlot === i}
+                            title={`Select L${i+1} slot`}
+                          >
+                            <div className="leading-none" style={{ color: 'currentColor' }}>
+                              <SpritePreview id={id} size={18} />
+                            </div>
+                            <div className="text-[10px]">L{i+1}</div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Unlocked list shared */}
+                  <div>
+                    <h3 className="text-[12px] font-semibold text-zinc-300 mb-2">Unlocked Sprites</h3>
+                    <div className="grid grid-cols-8 gap-2">
+                      {(settings.unlockedSprites?.length ? settings.unlockedSprites : ALL_SPRITES.map(s=>s.id)).map(id => {
+                        const usedSlots = (settings.coreSprites || []).map((s, i) => s === id ? i : -1).filter(i => i >= 0)
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => {
+                              const newSprites = [...settings.coreSprites]
+                              newSprites[Math.max(0, Math.min(4, activeSlot))] = id
+                              onSettingsChange({ ...settings, coreSprites: newSprites })
+                            }}
+                            className={`relative h-10 rounded border flex items-center justify-center text-sm ${ (settings.coreSprites.includes(id)) ? 'border-blue-500/60 bg-blue-500/10 text-blue-200' : 'border-zinc-700/60 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-700/40'}`}
+                            title={ALL_SPRITES.find(s=>s.id===id)?.name || id}
+                          >
+                            <SpritePreview id={id} size={16} />
+                            {usedSlots.length > 0 && (
+                              <div className="absolute -top-1 -right-1 flex gap-0.5 flex-wrap max-w-[42px] justify-end">
+                                {usedSlots.map(slot => (
+                                  <span key={`${id}-slot-${slot}`} className="px-0.5 rounded bg-blue-500/30 border border-blue-500/40 text-[9px] leading-none">
+                                    L{slot+1}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {(() => {
+                      const total = ALL_SPRITES.length
+                      const cnt = settings.unlockedSprites?.length ?? total
+                      const pct = cnt/total
+                      const color = pct>=1?'text-green-400': pct>=0.75?'text-lime-300': pct>=0.5?'text-yellow-400': pct>=0.25?'text-orange-400':'text-red-500'
+                      return <div className="mt-2 text-[11px] text-zinc-400">Collected: <span className={`font-semibold ${color}`}>{cnt}</span>/{total}</div>
+                    })()}
+                  </div>
                 </div>
               )}
 
@@ -266,9 +427,10 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                       onClick={() => {
                         const newRgbNeon = !settings.specialEffects.rgbNeon
                         console.log(`RGB Neon toggled: ${newRgbNeon}`)
+                        // Mutual exclusion: disable custom shift when enabling neon
                         onSettingsChange({
                           ...settings,
-                          specialEffects: { ...settings.specialEffects, rgbNeon: newRgbNeon }
+                          specialEffects: { ...settings.specialEffects, rgbNeon: newRgbNeon, customShift: newRgbNeon ? false : (settings.specialEffects as any).customShift }
                         })
                       }}
                       className={`px-3 py-1 text-[10px] rounded transition-all ${
@@ -279,6 +441,59 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                     >
                       {settings.specialEffects.rgbNeon ? 'Enabled' : 'Disabled'}
                     </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-[12px] font-semibold text-zinc-300">Custom Shift</h3>
+                      <p className="text-[10px] text-zinc-500 mt-1">Animated gradient using your palette (L1..L5)</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const current = (settings.specialEffects as any).customShift || false
+                        const next = !current
+                        onSettingsChange({
+                          ...settings,
+                          specialEffects: { ...(settings.specialEffects as any), customShift: next, rgbNeon: next ? false : settings.specialEffects.rgbNeon }
+                        })
+                      }}
+                      className={`px-3 py-1 text-[10px] rounded transition-all ${
+                        (settings.specialEffects as any).customShift
+                          ? 'bg-blue-500/20 border border-blue-500/50 text-blue-200'
+                          : 'bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700/60'
+                      }`}
+                    >
+                      {(settings.specialEffects as any).customShift ? 'Enabled' : 'Disabled'}
+                    </button>
+                  </div>
+
+                  {/* Shift Speed Slider */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-[12px] font-semibold text-zinc-300">Shift Speed</h3>
+                        <p className="text-[10px] text-zinc-500 mt-1">Adjust animation speed (0.25× – 3×)</p>
+                      </div>
+                      <div className="text-[11px] text-zinc-300 tabular-nums">
+                        {(settings.specialEffects as any).shiftSpeed ? (settings.specialEffects as any).shiftSpeed.toFixed(2) + '×' : '1.00×'}
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.25}
+                      max={3}
+                      step={0.05}
+                      value={(settings.specialEffects as any).shiftSpeed ?? 1.0}
+                      onChange={(e) => {
+                        const v = Math.max(0.25, Math.min(3, parseFloat(e.target.value))) || 1.0
+                        onSettingsChange({
+                          ...settings,
+                          specialEffects: { ...(settings.specialEffects as any), shiftSpeed: v }
+                        })
+                      }}
+                      className="w-full accent-blue-500"
+                      aria-label="Shift speed"
+                    />
                   </div>
                 </div>
               )}

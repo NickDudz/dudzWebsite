@@ -2,10 +2,11 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import SaveManager from "./SaveManager"
 
 export type SettingsDropdownProps = {
-  starsOn: boolean
-  onStarsToggle: () => void
+  bgEffectsOn: boolean
+  onBgEffectsToggle: () => void
   panelsOn: boolean
   onPanelsToggle: () => void
   galaxyOn: boolean
@@ -16,11 +17,14 @@ export type SettingsDropdownProps = {
   onQualityModeChange?: (mode: 'low' | 'high' | 'extreme') => void
   showFpsCounter?: boolean
   onFpsCounterToggle?: () => void
+  onExportSave?: () => string | null
+  onImportSave?: (saveData: string) => boolean
+  onClearSave?: () => boolean
 }
 
 export default function SettingsDropdown({
-  starsOn,
-  onStarsToggle,
+  bgEffectsOn,
+  onBgEffectsToggle,
   panelsOn,
   onPanelsToggle,
   galaxyOn,
@@ -31,6 +35,9 @@ export default function SettingsDropdown({
   onQualityModeChange,
   showFpsCounter = false,
   onFpsCounterToggle,
+  onExportSave,
+  onImportSave,
+  onClearSave,
 }: SettingsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -85,16 +92,19 @@ export default function SettingsDropdown({
               {/* Toggle Controls */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-zinc-300">Starfield</span>
+                  <div>
+                    <span className="text-xs text-zinc-300">BG Effects</span>
+                    <div className="text-[10px] text-zinc-500">Starfield & ambient data</div>
+                  </div>
                   <button
-                    onClick={onStarsToggle}
+                    onClick={onBgEffectsToggle}
                     className={`px-2 py-1 text-[10px] rounded transition-all ${
-                      starsOn
+                      bgEffectsOn
                         ? 'bg-blue-500/20 border border-blue-500/50 text-blue-200'
                         : 'bg-zinc-700/30 border border-zinc-600/50 text-zinc-400'
                     }`}
                   >
-                    {starsOn ? 'On' : 'Off'}
+                    {bgEffectsOn ? 'On' : 'Off'}
                   </button>
                 </div>
 
@@ -179,6 +189,15 @@ export default function SettingsDropdown({
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* Save Management Section */}
+              <div className="border-t border-zinc-700/50 pt-3">
+                <SaveManager
+                  onExport={onExportSave || (() => null)}
+                  onImport={onImportSave || (() => false)}
+                  onClear={onClearSave || (() => false)}
+                />
               </div>
             </div>
           </motion.div>

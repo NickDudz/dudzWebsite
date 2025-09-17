@@ -8,11 +8,12 @@ import ErrorBoundary from '../components/ErrorBoundary'
 import StarfieldCanvas from '../components/StarfieldCanvas'
 import SettingsDropdown from '../components/SettingsDropdown'
 import FpsCounter from '../components/FpsCounter'
+import CosmeticsPanel from '../components/CosmeticsPanel'
 import { useClusteringGalaxy } from '../hooks/useClusteringGalaxy'
 
 
 export default function Page() {
-  const [starsOn, setStarsOn] = useState(true)
+  const [bgEffectsOn, setBgEffectsOn] = useState(true) // Controls starfield AND ambient data
   const [galaxyOn, setGalaxyOn] = useState(false)
   const [hudCollapsed, setHudCollapsed] = useState(true)
   const [hudSidebar, setHudSidebar] = useState(false)
@@ -23,6 +24,8 @@ export default function Page() {
   const [smoothY, setSmoothY] = useState(0)
   const [showInstr, setShowInstr] = useState(false)
   const [showFpsCounter, setShowFpsCounter] = useState(false)
+  const [showPanelsHint, setShowPanelsHint] = useState(false)
+  const [cosmeticsVisible, setCosmeticsVisible] = useState(false)
   const lagFactor = 0.05 // Smoother interpolation for parallax
 
   useEffect(() => {
@@ -32,9 +35,10 @@ export default function Page() {
   }, [])
 
   // Galaxy state hook (single RAF loop internally)
-  const galaxy = useClusteringGalaxy({ 
-    enabled: galaxyOn, 
-    orbitalMode: true // Enable circular orbit with slight wavy path
+  const galaxy = useClusteringGalaxy({
+    enabled: galaxyOn,
+    orbitalMode: true, // Enable circular orbit with slight wavy path
+    bgEffectsEnabled: bgEffectsOn // Control ambient data rendering
   })
 
   // Auto-start game (disable tutorial/intro)
@@ -95,9 +99,9 @@ export default function Page() {
   return (
     <main className="relative min-h-screen bg-[#07090c] text-zinc-200 font-mono overflow-hidden">
       {/* Canvas starfield (performant, pointer-events: none) */}
-      {starsOn && (
+      {bgEffectsOn && (
         <StarfieldCanvas
-          enabled={starsOn}
+          enabled={bgEffectsOn}
           parallaxY={smoothY}
           getTargetFps={galaxy.api?.getTargetFps}
           lowQuality={galaxy.api?.getPerformanceMode?.() ?? false}
@@ -118,26 +122,27 @@ export default function Page() {
         show={showFpsCounter}
         getCurrentFps={galaxy.api?.getCurrentFps}
         getTargetFps={galaxy.api?.getTargetFps}
+        className="fixed top-16 left-4 z-40 pointer-events-none"
       />
 
       <div className="relative z-[20] mx-auto max-w-6xl px-4 pb-20 pt-6 sm:px-6 lg:px-8">
-        <div className={`mb-4 flex items-center justify-between gap-4 ${hudSidebar ? 'pr-[0px] sm:pr-[24rem]' : ''}`}>
+        <div className={`mb-4 flex items-center justify-between gap-4 ${hudSidebar ? 'pr-[0px] sm:pr-[24rem]' : ''} ${galaxyOn ? 'pr-[200px] sm:pr-[240px]' : ''}`}>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
               <a
                 href="mailto:nick@dudz.pro"
-                className="flex items-center gap-2 px-3 py-2 rounded-md border border-zinc-700/70 bg-zinc-900/60 text-xs text-zinc-300 backdrop-blur transition hover:border-zinc-600 hover:text-zinc-100 hover:bg-zinc-800/60"
+                className={`${panelsOn ? 'flex items-center gap-2 px-3 py-2' : 'p-2'} rounded-md border border-zinc-700/70 bg-zinc-900/60 text-xs text-zinc-300 backdrop-blur transition hover:border-zinc-600 hover:text-zinc-100 hover:bg-zinc-800/60`}
                 title="Email"
               >
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
                   <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
                 </svg>
-                <span>Email</span>
+                {panelsOn && <span>Email</span>}
               </a>
               <a
                 href="https://github.com/nickdudz"
-                className="flex items-center gap-2 px-3 py-2 rounded-md border border-zinc-700/70 bg-zinc-900/60 text-xs text-zinc-300 backdrop-blur transition hover:border-zinc-600 hover:text-zinc-100 hover:bg-zinc-800/60"
+                className={`${panelsOn ? 'flex items-center gap-2 px-3 py-2' : 'p-2'} rounded-md border border-zinc-700/70 bg-zinc-900/60 text-xs text-zinc-300 backdrop-blur transition hover:border-zinc-600 hover:text-zinc-100 hover:bg-zinc-800/60`}
                 title="GitHub"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -146,37 +151,67 @@ export default function Page() {
                   <path fillRule="evenodd" d="M10 0C4.477 0 0 4.484 0 10.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0110 4.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.203 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-
 0.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0020 10.017C20 4.484 15.522 0 10 0z" clipRule="evenodd" />
                 </svg>
-                <span>GitHub</span>
+                {panelsOn && <span>GitHub</span>}
               </a>
+              <SettingsDropdown
+                bgEffectsOn={bgEffectsOn}
+                onBgEffectsToggle={() => setBgEffectsOn(v => !v)}
+                panelsOn={panelsOn}
+                onPanelsToggle={() => setPanelsOn(v => !v)}
+                galaxyOn={galaxyOn}
+                onGalaxyToggle={() => setGalaxyOn(v => !v)}
+                targetFps={galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30}
+                onTargetFpsChange={(fps) => galaxy.api?.setTargetFps?.(fps)}
+                qualityMode={
+                  galaxy.api?.getExtremeMode?.() ? 'extreme' : (galaxy.api?.getPerformanceMode?.() ? 'low' : 'high')
+                }
+                onQualityModeChange={(mode) => {
+                  if (mode === 'low') {
+                    galaxy.api?.setExtremeMode?.(false)
+                    galaxy.api?.setPerformanceMode?.(true)
+                  } else if (mode === 'high') {
+                    galaxy.api?.setExtremeMode?.(false)
+                    galaxy.api?.setPerformanceMode?.(false)
+                  } else if (mode === 'extreme') {
+                    galaxy.api?.setPerformanceMode?.(false)
+                    galaxy.api?.setExtremeMode?.(true)
+                  }
+                }}
+                showFpsCounter={showFpsCounter}
+                onFpsCounterToggle={() => setShowFpsCounter(v => !v)}
+                onExportSave={() => galaxy.api?.exportSaveData?.() || null}
+                onImportSave={(saveData) => galaxy.api?.loadSaveData?.(saveData) || false}
+                onClearSave={() => galaxy.api?.clearSaveData?.() || false}
+              />
             </div>
           </div>
-          <SettingsDropdown
-            starsOn={starsOn}
-            onStarsToggle={() => setStarsOn(v => !v)}
-            panelsOn={panelsOn}
-            onPanelsToggle={() => setPanelsOn(v => !v)}
-            galaxyOn={galaxyOn}
-            onGalaxyToggle={() => setGalaxyOn(v => !v)}
-            targetFps={galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30}
-            onTargetFpsChange={(fps) => galaxy.api?.setTargetFps?.(fps)}
-            qualityMode={
-              galaxy.api?.getExtremeMode?.() ? 'extreme' : (galaxy.api?.getPerformanceMode?.() ? 'low' : 'high')
-            }
-            onQualityModeChange={(mode) => {
-              if (mode === 'low') {
-                galaxy.api?.setExtremeMode?.(false)
-                galaxy.api?.setPerformanceMode?.(true)
-              } else if (mode === 'high') {
-                galaxy.api?.setExtremeMode?.(false)
-                galaxy.api?.setPerformanceMode?.(false)
-              } else if (mode === 'extreme') {
-                galaxy.api?.setPerformanceMode?.(false)
-                galaxy.api?.setExtremeMode?.(true)
-              }
-            }}
-            showFpsCounter={showFpsCounter}
-            onFpsCounterToggle={() => setShowFpsCounter(v => !v)}
-          />
+
+          {/* Expand Game Button - Center */}
+          {panelsOn && (
+            <div className="absolute left-1/2 transform -translate-x-1/2">
+              <motion.button
+                onClick={() => { setPanelsOn(false); setShowPanelsHint(true); setTimeout(() => setShowPanelsHint(false), 5000) }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex items-center gap-2 px-4 py-2 rounded-md border border-blue-600/70 bg-blue-600/20 text-xs text-blue-200 backdrop-blur transition hover:border-blue-500 hover:bg-blue-600/30"
+                title="Expand Game"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Expand Game</span>
+              </motion.button>
+            </div>
+          )}
+
+          {/* Toast hint for re-enabling panels */}
+          {showPanelsHint && (
+            <div className="fixed top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1.5 rounded border border-zinc-700/60 bg-zinc-900/80 text-[11px] text-zinc-200 backdrop-blur">
+              Panels can be re-enabled in Settings.
+            </div>
+          )}
+
+          <div></div>
         </div>
 
         {/* HUD right side; collapsible */}
@@ -208,6 +243,26 @@ export default function Page() {
       </div>
 
       {/* Tutorial disabled */}
+
+      {/* Cosmetics Panel */}
+      {galaxyOn && (
+        <CosmeticsPanel
+          visible={cosmeticsVisible}
+          onToggle={() => setCosmeticsVisible(v => !v)}
+          settings={galaxy.state?.cosmetics || galaxy.api?.getCosmeticsSettings() || {
+            coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
+            ambientColors: ["#e5e7eb"],
+            coreSprites: ['database', 'database', 'database', 'database', 'database'],
+            unlockedSprites: [],
+            specialEffects: { rgbNeon: false }
+          }}
+          onSettingsChange={(settings) => {
+            console.log('CosmeticsPanel onSettingsChange called with:', settings)
+            galaxy.api?.setCosmeticsSettings?.(settings)
+          }}
+          unlocked={true || galaxy.state?.iqUpgrades?.spritesUnlocked || galaxy.state?.iqUpgrades?.paletteUnlocked || false}
+        />
+      )}
     </main>
   )
 }

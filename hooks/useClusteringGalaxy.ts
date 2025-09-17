@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { GAME_CONFIG } from "../constants/gameConstants"
+import { SPRITE_EMOJI, ALL_SPRITE_IDS } from "../constants/sprites"
 
 // Public types and API
 /**
@@ -77,6 +78,8 @@ export type GalaxyAPI = {
   purchaseIQ: (key: 'computeMult' | 'autoCollect' | 'confetti' | 'palette') => void
   triggerEffect: (name: "confetti" | "palette") => void
   getStats: () => { tokensPerSec: number; coresByLevel: number[]; totalEverCollected: number; currentFloatingData: number }
+  getCosmeticsSettings?: () => { coreColors: string[]; ambientColors: string[]; coreSprites: string[]; unlockedSprites: string[]; specialEffects?: { rgbNeon?: boolean; customShift?: boolean; shiftSpeed?: number } }
+  setCosmeticsSettings?: (settings: { coreColors: string[]; ambientColors: string[]; coreSprites: string[]; unlockedSprites: string[]; specialEffects?: { rgbNeon?: boolean; customShift?: boolean; shiftSpeed?: number } }) => void
   setTargetFps: (fps: number) => void
   getTargetFps: () => number
   setPerformanceMode: (lowQuality: boolean) => void
@@ -131,20 +134,92 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     ORBIT_LIMIT_BASE,
   } = GAME_CONFIG
 
-  const COLORS = useMemo(() => [
-    // 0..n color slots; keep alpha separate in draw record
-    // blues/purples on dark bg
-    "#93c5fd", // light blue
-    "#a78bfa", // violet
-    "#818cf8", // indigo
-    "#60a5fa", // blue
-    "#e5e7eb", // neutral light for outliers
-    "#3b82f6", // blue (level 1) - matches GalaxyUI gradient
-    "#6366f1", // indigo (level 2) - matches GalaxyUI gradient
-    "#8b5cf6", // violet (level 3) - matches GalaxyUI gradient
-    "#a855f7", // purple (level 4) - matches GalaxyUI gradient
-    "#c084fc", // light purple (level 5) - matches GalaxyUI gradient
-  ], [])
+  function getColors() {
+    // Base slots 0..4 are used by non-core elements; keep them stable
+    const base = [
+      "#93c5fd",
+      "#a78bfa",
+      "#818cf8",
+      "#60a5fa",
+      "#e5e7eb",
+    ]
+    // Pull palette from cosmetics if available
+    const cos = (snapshot as any)?.currentCosmetics
+    const palette: string[] = Array.isArray(cos?.coreColors) && cos.coreColors.length >= 5
+      ? cos.coreColors
+      : ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"]
+    return [...base, ...palette.slice(0,5)]
+  }
+
+  // --- Special Effects Color Helpers ---
+  function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+    if (!hex) return null
+    let h = hex.startsWith('#') ? hex.slice(1) : hex
+    if (h.length === 3) h = h.split('').map(c => c + c).join('')
+    if (h.length !== 6) return null
+    const r = parseInt(h.slice(0, 2), 16)
+    const g = parseInt(h.slice(2, 4), 16)
+    const b = parseInt(h.slice(4, 6), 16)
+    if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null
+    return { r, g, b }
+  }
+  function rgbToHex(r: number, g: number, b: number): string {
+    const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)))
+    const to2 = (v: number) => clamp(v).toString(16).padStart(2, '0')
+    return `#${to2(r)}${to2(g)}${to2(b)}`
+  }
+  function lerp(a: number, b: number, t: number): number { return a + (b - a) * t }
+  function lerpHex(aHex: string, bHex: string, t: number): string {
+    const a = hexToRgb(aHex); const b = hexToRgb(bHex)
+    if (!a || !b) return aHex || bHex || '#ffffff'
+    return rgbToHex(lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t))
+  }
+  function sampleStops(stops: string[], phase01: number): string {
+    if (!stops || stops.length === 0) return '#ffffff'
+    if (stops.length === 1) return stops[0]
+    const p = ((phase01 % 1) + 1) % 1
+    const seg = 1 / stops.length
+    const idx = Math.floor(p / seg)
+    const t = (p - idx * seg) / seg
+    const a = stops[idx]
+    const b = stops[(idx + 1) % stops.length]
+    return lerpHex(a, b, t)
+  }
+  function rainbowStops(): string[] {
+    // 6-color rainbow approximately
+    return ['#ff0000', '#ffa500', '#ffff00', '#00ff00', '#00a4ff', '#8b00ff']
+  }
+  function computeLevelFromColorIndex(idx: number): number {
+    for (let i = 0; i < GAME_CONFIG.LEVEL_COLOR_INDEX.length; i++) {
+      if (GAME_CONFIG.LEVEL_COLOR_INDEX[i] === idx) return i + 1
+    }
+    return 1
+  }
+  function applySpecialColor(level: number, baseHex: string, nowSec: number): string {
+    const cos = (snapshot as any).currentCosmetics || null
+    const special = cos?.specialEffects || {}
+    const userSpeed = typeof special?.shiftSpeed === 'number' && isFinite(special.shiftSpeed) ? Math.max(0.25, Math.min(3, special.shiftSpeed)) : 1.0
+    if (special?.customShift) {
+      const pal: string[] = Array.isArray(cos?.coreColors) && cos.coreColors.length > 0
+        ? cos.coreColors.slice(0, Math.max(1, Math.min(5, level)))
+        : ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"].slice(0, Math.max(1, Math.min(5, level)))
+      const speed = 0.15 * userSpeed
+      const phase = (nowSec * speed + level * 0.07) % 1
+      if (pal.length === 1) {
+        // Single color: gently pulse toward white then back
+        const t = 0.5 + 0.5 * Math.sin(nowSec * 1.2 * userSpeed + level)
+        return lerpHex(pal[0], '#ffffff', 0.08 * t)
+      }
+      return sampleStops(pal, phase)
+    }
+    if (special?.rgbNeon) {
+      const stops = rainbowStops()
+      const speed = 0.2 * userSpeed
+      const phase = (nowSec * speed + level * 0.1) % 1
+      return sampleStops(stops, phase)
+    }
+    return baseHex
+  }
   const LEVEL_COLOR_INDEX = GAME_CONFIG.LEVEL_COLOR_INDEX
   const LEVEL_RATE = GAME_CONFIG.LEVEL_RATE
 
@@ -536,9 +611,41 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const upgrades = sanitizeUpgrades(upgradesRaw ? JSON.parse(upgradesRaw) : {})
       const iqUpgrades = sanitizeIQUpgrades(iqUpRaw ? JSON.parse(iqUpRaw) : {})
       const lastSeen = lastSeenRaw ? (parseInt(lastSeenRaw, 10) || Date.now()) : Date.now()
-      const totalEverCollected = 0 // Will be loaded separately if it exists
+      const tecRaw = localStorage.getItem('galaxy.totalEverCollected')
+      const totalEverCollected = tecRaw ? (parseInt(tecRaw, 10) || 0) : 0
       persisted.current = { tokens, iq, upgrades, iqUpgrades, lastSeen, totalEverCollected }
       setUiState({ tokens, iq, upgrades, iqUpgrades })
+      // Restore cores
+      const coreDataRaw = localStorage.getItem('galaxy.coreData')
+      if (coreDataRaw) {
+        try {
+          const arr = JSON.parse(coreDataRaw)
+          if (Array.isArray(arr)) {
+            clusters.current = []
+            for (const item of arr) {
+              const level = Math.max(1, Math.min(5, parseInt(item.level, 10) || 1))
+              const stackCount = Math.max(1, parseInt(item.stackCount, 10) || 1)
+              const x = SPAWN_MARGIN + Math.random() * Math.max(0, worldW.current - SPAWN_MARGIN * 2)
+              const y = Math.max(TOP_EXCLUDE, SPAWN_MARGIN + Math.random() * Math.max(0, worldH.current - SPAWN_MARGIN * 2 - TOP_EXCLUDE))
+              clusters.current.push({
+                id: clusters.current.length,
+                x, y,
+                level,
+                progress: 0,
+                members: 0,
+                radius: 5 + level * 2,
+                emitTimer: 0,
+                flashT: 0,
+                webIndices: [],
+                colorIndex: LEVEL_COLOR_INDEX[level - 1] || LEVEL_COLOR_INDEX[0],
+                stackCount,
+                isVisible: true,
+                scaleMultiplier: 1.0,
+              })
+            }
+          }
+        } catch {}
+      }
       // Offline trickle
       const minutes = (Date.now() - lastSeen) / 60000
       const add = computeOfflineTrickle(minutes)
@@ -587,6 +694,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         localStorage.setItem("galaxy.iqUpgrades", JSON.stringify(persisted.current.iqUpgrades))
         localStorage.setItem("galaxy.iq", String(persisted.current.iq))
         localStorage.setItem("galaxy.lastSeen", String(Date.now()))
+        localStorage.setItem("galaxy.totalEverCollected", String(persisted.current.totalEverCollected || 0))
+        // Save coreData for restore-on-load
+        const coreData = clusters.current.map(c => ({ level: c.level, x: c.x, y: c.y, stackCount: c.stackCount || 1 }))
+        localStorage.setItem("galaxy.coreData", JSON.stringify(coreData))
       } catch (error) {
         console.warn('Failed to save game state to localStorage:', error)
       }
@@ -601,6 +712,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           localStorage.setItem("galaxy.iqUpgrades", JSON.stringify(persisted.current.iqUpgrades))
           localStorage.setItem("galaxy.iq", String(persisted.current.iq))
           localStorage.setItem("galaxy.lastSeen", String(Date.now()))
+          localStorage.setItem("galaxy.totalEverCollected", String(persisted.current.totalEverCollected || 0))
+          const coreData = clusters.current.map(c => ({ level: c.level, x: c.x, y: c.y, stackCount: c.stackCount || 1 }))
+          localStorage.setItem("galaxy.coreData", JSON.stringify(coreData))
         }
       } catch (error) {
         console.warn('Failed to save game state on unload:', error)
@@ -843,6 +957,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           const c2 = clusters.current[p.targetCluster]
           c2.members += 1
           c2.progress += 1
+          if (persisted.current) {
+            persisted.current.totalEverCollected = (persisted.current.totalEverCollected || 0) + 1
+          }
 
           // Trigger collection animation
           c2.collectAnimT = 0.3 // Short collection pulse
@@ -1453,6 +1570,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
   function renderAll() {
     buildSnapshot()
+    // Refresh cosmetics for color mapping on each frame
+    try {
+      const raw = localStorage.getItem('galaxy.cosmetics')
+      ;(snapshot as any).currentCosmetics = raw ? JSON.parse(raw) : null
+    } catch { (snapshot as any).currentCosmetics = null }
     if (canvases.current.size === 0) return
     const snap = snapshot.current
     // Render into each registered canvas context
@@ -1485,6 +1607,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           for (let i = 0; i < clusters.current.length; i++) {
             const c = clusters.current[i]
             if (c.isVisible === false) continue
+            const COLORS = getColors()
             ctx.strokeStyle = COLORS[c.colorIndex] || COLORS[0]
             const web = c.webIndices
             const maxLines = extremeMode.current ? 4 : (lowQualityMode.current ? GAME_CONFIG.WEB_MAX_LINES_LOW : GAME_CONFIG.WEB_MAX_LINES_HIGH)
@@ -1504,7 +1627,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         // Draw in order; halos as circles, cores as CPU icons, others as page icons
         for (let i = 0; i < snap.points.length; i++) {
           const r = snap.points[i]
-          const color = COLORS[r.color] || COLORS[0]
+          const COLORS = getColors()
+          let color = COLORS[r.color] || COLORS[0]
           if (r.shape === 'halo') {
             // Create radial gradient for proper glowing halo effect
             const gradient = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, r.radius)
@@ -1520,6 +1644,112 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
             continue
           }
           if (r.shape === 'core') {
+            // Apply special effects color override per level
+            const level = Math.max(1, Math.min(5, (r.variant ?? 1)))
+            color = applySpecialColor(level, color, performance.now() * 0.001)
+            // Determine sprite selection from cosmetics per level (segments = level)
+            const cos = (snapshot as any).currentCosmetics || null
+            const spriteId = (cos && Array.isArray(cos.coreSprites) && cos.coreSprites[level - 1]) ? cos.coreSprites[level - 1] : 'database'
+
+            // If a non-database sprite is selected, render shape/emoji
+            if (spriteId && spriteId !== 'database') {
+              const sizeBase = r.radius * 2.6
+              const sizeScale = level === 1 ? 1.18 : level === 2 ? 1.12 : level === 3 ? 1.06 : 1.0
+              const size = sizeBase * sizeScale
+              const cx = r.x, cy = r.y
+
+              ctx.save()
+              ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
+              ctx.fillStyle = color
+              ctx.strokeStyle = color
+              ctx.lineWidth = 2
+              if (spriteId === 'circle' || spriteId === 'ring') {
+                const radius = size * 0.5
+                ctx.beginPath()
+                ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+                if (spriteId === 'ring') {
+                  ctx.stroke()
+                } else {
+                  ctx.fill()
+                }
+              } else if (spriteId === 'square') {
+                const s = size * 0.9
+                ctx.fillRect(cx - s/2, cy - s/2, s, s)
+              } else if (spriteId === 'star') {
+                const spikes = 5
+                const outerR = size * 0.5
+                const innerR = outerR * 0.5
+                let rot = Math.PI / 2 * 3
+                let x = cx
+                let y = cy
+                ctx.beginPath()
+                ctx.moveTo(cx, cy - outerR)
+                for (let i = 0; i < spikes; i++) {
+                  x = cx + Math.cos(rot) * outerR
+                  y = cy + Math.sin(rot) * outerR
+                  ctx.lineTo(x, y)
+                  rot += Math.PI / spikes
+                  x = cx + Math.cos(rot) * innerR
+                  y = cy + Math.sin(rot) * innerR
+                  ctx.lineTo(x, y)
+                  rot += Math.PI / spikes
+                }
+                ctx.lineTo(cx, cy - outerR)
+                ctx.closePath()
+                ctx.fill()
+              } else if (spriteId === 'triangle') {
+                const r2 = size * 0.55
+                ctx.beginPath()
+                ctx.moveTo(cx, cy - r2)
+                ctx.lineTo(cx - r2 * 0.87, cy + r2 * 0.5)
+                ctx.lineTo(cx + r2 * 0.87, cy + r2 * 0.5)
+                ctx.closePath()
+                ctx.fill()
+              } else if (spriteId === 'diamond_shape') {
+                const r2 = size * 0.6
+                ctx.beginPath()
+                ctx.moveTo(cx, cy - r2)
+                ctx.lineTo(cx + r2, cy)
+                ctx.lineTo(cx, cy + r2)
+                ctx.lineTo(cx - r2, cy)
+                ctx.closePath()
+                ctx.fill()
+              } else if (spriteId === 'hexagon') {
+                const r2 = size * 0.5
+                ctx.beginPath()
+                for (let i = 0; i < 6; i++) {
+                  const a = (Math.PI / 3) * i - Math.PI / 6
+                  const x = cx + Math.cos(a) * r2
+                  const y = cy + Math.sin(a) * r2
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+                }
+                ctx.closePath()
+                ctx.fill()
+              } else if (spriteId === 'plus') {
+                const w = size * 0.2
+                const l = size * 0.5
+                ctx.fillRect(cx - w/2, cy - l, w, l * 2)
+                ctx.fillRect(cx - l, cy - w/2, l * 2, w)
+              } else {
+                // Fallback to emoji glyphs (tinted)
+                const glyph = (SPRITE_EMOJI as any)[spriteId] || '✨'
+                ctx.font = `${Math.max(10, size)}px serif`
+                ctx.textAlign = 'center'
+                ctx.textBaseline = 'middle'
+                ctx.save()
+                ctx.globalAlpha = 1
+                ctx.fillStyle = '#ffffff'
+                ctx.fillText(glyph, cx, cy)
+                ctx.globalCompositeOperation = 'source-atop'
+                ctx.globalAlpha = 0.45
+                ctx.fillStyle = color
+                ctx.beginPath(); ctx.arc(cx, cy, size * 0.6, 0, Math.PI * 2); ctx.fill()
+                ctx.restore()
+              }
+              ctx.restore()
+              continue
+            }
+
             // Database cylinder icon with 1..5 segments based on variant (core level)
             // Simplified lines with curved separators; cylinder height grows with level.
             const glowFrac = Math.max(0, Math.min(1, r.glow || 0))
@@ -1735,6 +1965,31 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       if (canvas) canvases.current.add(canvas)
       return () => { if (canvas) canvases.current.delete(canvas) }
     },
+    getCosmeticsSettings() {
+      try {
+        const raw = localStorage.getItem("galaxy.cosmetics")
+        if (raw) {
+          const saved = JSON.parse(raw)
+          // Ensure unlockedSprites contains any newly added IDs so they appear in the panel
+          const list = Array.isArray(saved?.unlockedSprites) ? saved.unlockedSprites : []
+          const merged = Array.from(new Set([...(list || []), ...ALL_SPRITE_IDS]))
+          saved.unlockedSprites = merged
+          return saved
+        }
+      } catch {}
+      // minimal fallback
+      return {
+        coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
+        ambientColors: ["#e5e7eb"],
+        coreSprites: ['database','database','database','database','database'],
+        unlockedSprites: [...ALL_SPRITE_IDS],
+        specialEffects: { rgbNeon: false, customShift: false, shiftSpeed: 1.0 }
+      }
+    },
+    setCosmeticsSettings(settings) {
+      try { localStorage.setItem("galaxy.cosmetics", JSON.stringify(settings)) } catch {}
+      setUiState(s => ({ ...s, cosmetics: settings as any }))
+    },
     setTargetFps(fps: number) {
       const clamped = Math.max(15, Math.min(120, Math.round(fps)))
       targetFps.current = clamped
@@ -1896,7 +2151,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       for (let i = 0; i < counts.length; i++) tps += LEVEL_RATE[i] * counts[i]
       tps *= computeMult
       const totalEverCollected = persisted.current?.totalEverCollected ?? 0
-      const currentFloatingData = points.current.filter(p => p.state === 'outlier').length
+      // Compute floating data as pages currently attached to cores
+      let currentFloatingData = 0
+      for (let i = 0; i < clusters.current.length; i++) currentFloatingData += (clusters.current[i].members || 0) * (clusters.current[i].stackCount || 1)
       return { tokensPerSec: tps, coresByLevel: counts, totalEverCollected, currentFloatingData }
     },
     // Debug functions for testing

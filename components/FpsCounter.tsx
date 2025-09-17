@@ -6,9 +6,10 @@ export type FpsCounterProps = {
   show: boolean
   getCurrentFps?: () => number
   getTargetFps?: () => number
+  className?: string
 }
 
-export default function FpsCounter({ show, getCurrentFps, getTargetFps }: FpsCounterProps) {
+export default function FpsCounter({ show, getCurrentFps, getTargetFps, className }: FpsCounterProps) {
   const [fps, setFps] = useState(0)
   const [trueFps, setTrueFps] = useState(0)
   const [targetFps, setTargetFps] = useState(30)
@@ -65,7 +66,7 @@ export default function FpsCounter({ show, getCurrentFps, getTargetFps }: FpsCou
   }
 
   return (
-    <div className="fixed top-4 left-4 z-40 pointer-events-none">
+    <div className={className || "fixed top-4 left-4 z-40 pointer-events-none"}>
       <div className={`px-2 py-1 text-xs font-mono rounded border bg-black/60 backdrop-blur-sm ${getColorClass()}`}>
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-1">
