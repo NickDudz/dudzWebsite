@@ -267,22 +267,24 @@ export default function Page() {
 
       {/* Cosmetics Panel */}
       {galaxyOn && (
-        <CosmeticsPanel
-          visible={cosmeticsVisible}
-          onToggle={() => setCosmeticsVisible(v => !v)}
-          settings={galaxy.state?.cosmetics || galaxy.api?.getCosmeticsSettings() || {
-            coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
-            ambientColors: ["#e5e7eb"],
-            coreSprites: ['database', 'database', 'database', 'database', 'database'],
-            unlockedSprites: [],
-            specialEffects: { rgbNeon: false }
-          }}
-          onSettingsChange={(settings) => {
-            console.log('CosmeticsPanel onSettingsChange called with:', settings)
-            galaxy.api?.setCosmeticsSettings?.(settings)
-          }}
-          unlocked={true || galaxy.state?.iqUpgrades?.spritesUnlocked || galaxy.state?.iqUpgrades?.paletteUnlocked || false}
-        />
+        <div className="pointer-events-auto z-40 relative">
+          <CosmeticsPanel
+            visible={cosmeticsVisible}
+            onToggle={() => setCosmeticsVisible(v => !v)}
+            settings={galaxy.state?.cosmetics || galaxy.api?.getCosmeticsSettings() || {
+              coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
+              ambientColors: ["#e5e7eb"],
+              coreSprites: ['database', 'database', 'database', 'database', 'database'],
+              unlockedSprites: [],
+              specialEffects: { rgbNeon: false }
+            }}
+            onSettingsChange={(settings) => {
+              console.log('CosmeticsPanel onSettingsChange called with:', settings)
+              galaxy.api?.setCosmeticsSettings?.(settings)
+            }}
+            unlocked={true || galaxy.state?.iqUpgrades?.spritesUnlocked || galaxy.state?.iqUpgrades?.paletteUnlocked || false}
+          />
+        </div>
       )}
     </main>
   )
