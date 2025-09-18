@@ -1232,7 +1232,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
           // Smooth speed based on distance - faster when far, slower when close
           const speedFactor = Math.min(1, dist / 50) // Max speed when far, slow down when close
-          const spd = 200 + (dist * 2) // Base speed + distance-based acceleration
+          
+          // Enhanced capture speed: 50% faster base, scaling to 100% faster at 1000+ cores
+          const coreCount = clusters.current.length
+          const coreSpeedMultiplier = 1.5 + (Math.min(coreCount, 1000) / 1000) * 0.5 // 1.5x to 2x based on cores
+          const spd = (200 + (dist * 2)) * coreSpeedMultiplier // Base speed + distance-based acceleration + core scaling
         const nx = dx / (dist || 1)
         const ny = dy / (dist || 1)
 
@@ -1244,14 +1248,14 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
             const tangentY = nx
 
             // Stronger orbital speed that increases with distance for dramatic arcs
-            const orbitSpeed = Math.min(120, dist * 1.2 + 30) // Much stronger orbital pull
+            const orbitSpeed = Math.min(120, dist * 1.2 + 30) * coreSpeedMultiplier // Much stronger orbital pull + core scaling
             const orbitFactor = Math.max(0.3, Math.min(1, dist / 150)) // Full strength at medium distances
 
             orbitVx = tangentX * orbitSpeed * orbitFactor * speedFactor
             orbitVy = tangentY * orbitSpeed * orbitFactor * speedFactor
 
             // Add slight inward spiral component for more dramatic effect
-            const spiralStrength = Math.min(40, dist * 0.3)
+            const spiralStrength = Math.min(40, dist * 0.3) * coreSpeedMultiplier
             orbitVx += nx * spiralStrength * orbitFactor
             orbitVy += ny * spiralStrength * orbitFactor
           }
