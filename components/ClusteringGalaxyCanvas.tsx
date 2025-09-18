@@ -6,7 +6,7 @@ import type { DrawSnapshot } from "../hooks/useClusteringGalaxy"
 export type ClusteringGalaxyCanvasProps = {
   enabled: boolean
   parallaxY: number
-  api: { getDrawSnapshot(): DrawSnapshot; registerCanvas: (c: HTMLCanvasElement | null) => () => void; clickAt: (x: number, y: number) => void; startDrag: (x: number, y: number) => boolean; updateDrag: (x: number, y: number) => void; endDrag: () => void }
+  api: { getDrawSnapshot(): DrawSnapshot; registerCanvas: (c: HTMLCanvasElement | null) => () => void; clickAt: (x: number, y: number) => void; startDrag: (x: number, y: number) => boolean; updateDrag: (x: number, y: number) => void; endDrag: (velocityX: number, velocityY: number) => void }
 }
 
 /**
@@ -69,10 +69,10 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
     let dragStartCoords = { x: 0, y: 0 }
     let dragAttempted = false // Prevent multiple drag attempts
 
-    // Mouse velocity tracking for physics
+    // Enhanced mouse velocity tracking for dramatic physics effects
     let mouseHistory: { x: number; y: number; time: number }[] = []
-    const MAX_VELOCITY_HISTORY = 5 // Track last 5 positions
-    const VELOCITY_SAMPLE_TIME = 100 // Sample every 100ms
+    const MAX_VELOCITY_HISTORY = 6 // Track more positions for smoother velocity
+    const VELOCITY_SAMPLE_TIME = 50 // Sample more frequently for responsiveness
 
     const getCanvasCoords = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect()
@@ -105,7 +105,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       const coords = getCanvasCoords(e.clientX, e.clientY)
       const now = performance.now()
 
-      // Track mouse velocity for physics
+      // Enhanced mouse velocity tracking for more dramatic physics
       if (mouseHistory.length === 0 ||
           now - mouseHistory[mouseHistory.length - 1].time > VELOCITY_SAMPLE_TIME) {
         mouseHistory.push({ x: coords.x, y: coords.y, time: now })
@@ -160,15 +160,25 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       console.log('👆 Pointer up - isDragging:', isDragging, 'hasMoved:', hasMoved, 'dragAttempted:', dragAttempted)
 
       if (isDragging) {
-        // Calculate mouse velocity for physics effects
+        // Enhanced mouse velocity calculation for dramatic physics
         let velocityX = 0, velocityY = 0
         if (mouseHistory.length >= 2) {
+          // Use the most recent movement for velocity (more responsive)
           const recent = mouseHistory[mouseHistory.length - 1]
-          const older = mouseHistory[mouseHistory.length - 2]
-          const timeDiff = recent.time - older.time
+          const previous = mouseHistory[mouseHistory.length - 2]
+          const timeDiff = recent.time - previous.time
+
           if (timeDiff > 0) {
-            velocityX = (recent.x - older.x) / timeDiff * 1000 // pixels per second
-            velocityY = (recent.y - older.y) / timeDiff * 1000
+            velocityX = (recent.x - previous.x) / timeDiff * 1000 // pixels per second
+            velocityY = (recent.y - previous.y) / timeDiff * 1000
+
+            // Amplify fast movements for more dramatic effect
+            const speed = Math.sqrt(velocityX * velocityX + velocityY * velocityY)
+            if (speed > 500) { // If moving fast, amplify the effect
+              const amplifier = Math.min(2.5, speed / 500)
+              velocityX *= amplifier
+              velocityY *= amplifier
+            }
           }
         }
 
@@ -196,7 +206,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       console.log('🚫 Pointer cancelled - cleaning up drag state')
       if (isDragging) {
         console.log('🏁 Force ending drag due to pointer cancel')
-        api.endDrag()
+        api.endDrag(0, 0)
         canvas.releasePointerCapture(e.pointerId)
         isDragging = false
       } else if (dragAttempted) {
@@ -217,7 +227,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       console.log('🚫 Right-click detected - cancelling any active drag')
       if (isDragging) {
         console.log('🏁 Force ending drag due to right-click')
-        api.endDrag()
+        api.endDrag(0, 0)
         canvas.releasePointerCapture(1) // Release any captures
         isDragging = false
       }
@@ -233,7 +243,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       console.log('🚫 Window blur detected - cancelling any active drag')
       if (isDragging) {
         console.log('🏁 Force ending drag due to window blur')
-        api.endDrag()
+        api.endDrag(0, 0)
         // Note: Can't release pointer capture on blur as pointer might not exist
         isDragging = false
       }

@@ -11,6 +11,8 @@ export type CosmeticsSettings = {
   coreSprites: string[] // L1-L5 sprite choices
   specialEffects: {
     rgbNeon: boolean
+    customShift?: boolean
+    shiftSpeed?: number
   }
   unlockedSprites?: string[]
 }

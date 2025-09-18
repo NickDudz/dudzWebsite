@@ -38,8 +38,7 @@ export default function Page() {
   // Galaxy state hook (single RAF loop internally)
   const galaxy = useClusteringGalaxy({
     enabled: galaxyOn,
-    orbitalMode: true, // Enable circular orbit with slight wavy path
-    bgEffectsEnabled: bgEffectsOn // Control ambient data rendering
+    orbitalMode: true // Enable circular orbit with slight wavy path
   })
 
   // Auto-start game (disable tutorial/intro)
@@ -193,8 +192,8 @@ export default function Page() {
                 }}
                 showFpsCounter={showFpsCounter}
                 onFpsCounterToggle={() => setShowFpsCounter(v => !v)}
-                onExportSave={() => galaxy.api?.exportSaveData?.() || null}
-                onImportSave={(saveData) => galaxy.api?.loadSaveData?.(saveData) || false}
+                onExportSave={() => null} // Not implemented yet
+                onImportSave={(saveData) => false} // Not implemented yet
                 onClearSave={() => galaxy.api?.clearSaveData?.() || false}
               />
             </div>
@@ -272,18 +271,39 @@ export default function Page() {
           <CosmeticsPanel
             visible={cosmeticsVisible}
             onToggle={() => setCosmeticsVisible(v => !v)}
-            settings={galaxy.state?.cosmetics || galaxy.api?.getCosmeticsSettings() || {
-              coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
-              ambientColors: ["#e5e7eb"],
-              coreSprites: ['database', 'database', 'database', 'database', 'database'],
-              unlockedSprites: [],
-              specialEffects: { rgbNeon: false }
-            }}
+            settings={(() => {
+              const apiSettings = galaxy.api?.getCosmeticsSettings?.()
+              if (apiSettings) {
+                return {
+                  ...apiSettings,
+                  specialEffects: {
+                    rgbNeon: apiSettings.specialEffects?.rgbNeon ?? false
+                  }
+                }
+              }
+              return {
+                coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
+                ambientColors: ["#e5e7eb"],
+                coreSprites: ['database', 'database', 'database', 'database', 'database'],
+                unlockedSprites: [],
+                specialEffects: { rgbNeon: false }
+              }
+            })()}
             onSettingsChange={(settings) => {
               console.log('CosmeticsPanel onSettingsChange called with:', settings)
-              galaxy.api?.setCosmeticsSettings?.(settings)
+              // Ensure all required properties are present
+              const apiSettings = {
+                ...settings,
+                unlockedSprites: settings.unlockedSprites || [],
+                specialEffects: {
+                  rgbNeon: settings.specialEffects?.rgbNeon ?? false,
+                  customShift: false,
+                  shiftSpeed: 1.0
+                }
+              }
+              galaxy.api?.setCosmeticsSettings?.(apiSettings)
             }}
-            unlocked={true || galaxy.state?.iqUpgrades?.spritesUnlocked || galaxy.state?.iqUpgrades?.paletteUnlocked || false}
+            unlocked={true || galaxy.state?.iqUpgrades?.paletteUnlocked || false}
           />
         </div>
       )}

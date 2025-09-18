@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CRITICAL: Do NOT use GitHub (GH) unless explicitly directed by the user
+
+**IMPORTANT**: Only use git commands or push to GitHub when the user specifically requests it. Do not proactively commit, push, or use any git commands without explicit direction. The user will tell you when they want to use version control.
+
 ## Project Overview
 
 This is a Next.js 15 portfolio website for Nicholas Dudczyk (dudz.pro) featuring an animated starfield background with parallax scrolling effects and an integrated ML-themed clicker game. The site combines a professional portfolio with an interactive background game for engagement.
