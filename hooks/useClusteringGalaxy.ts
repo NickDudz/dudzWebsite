@@ -39,6 +39,8 @@ export type Point = {
   targetCluster?: number
   captureT?: number
   rotationOffset?: number // For star rotation sync
+  fadeState?: 'fadeIn' | 'visible' | 'fadeOut' | 'hidden' // For smooth ambient culling
+  fadeProgress?: number // 0-1 fade progress
 }
 
 export type Cluster = {
@@ -145,6 +147,68 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     unlockables: { rendered: 0, total: 0, limit: 0 },
     buffer: { used: 0, total: 0, available: 0 }
   })
+
+  // Two-canvas clustered data system
+  type ClusteredCanvas = {
+    coreId: number
+    angle1: number
+    angle2: number
+    speed1: number
+    speed2: number
+    distance1: number
+    distance2: number
+    dataCount1: number
+    dataCount2: number
+    maxDataPerCanvas: number
+  }
+  
+  const clusteredCanvases = useRef<Map<number, ClusteredCanvas>>(new Map())
+  
+  // Clustered canvas management functions
+  function getClusteredCanvas(coreId: number): ClusteredCanvas {
+    if (!clusteredCanvases.current.has(coreId)) {
+      // Initialize new canvas with different speeds and distances
+      const speed1 = 0.3 + Math.random() * 0.2 // 0.3-0.5 rad/s
+      const speed2 = 0.4 + Math.random() * 0.2 // 0.4-0.6 rad/s (different speed)
+      const distance1 = 25 + Math.random() * 10 // 25-35px from core
+      const distance2 = 30 + Math.random() * 10 // 30-40px from core (slightly different distance)
+      
+      clusteredCanvases.current.set(coreId, {
+        coreId,
+        angle1: Math.random() * Math.PI * 2,
+        angle2: Math.random() * Math.PI * 2,
+        speed1,
+        speed2,
+        distance1,
+        distance2,
+        dataCount1: 0,
+        dataCount2: 0,
+        maxDataPerCanvas: 5
+      })
+    }
+    return clusteredCanvases.current.get(coreId)!
+  }
+  
+  function updateClusteredCanvases(dt: number) {
+    for (const [coreId, canvas] of clusteredCanvases.current) {
+      // Update rotation angles
+      canvas.angle1 += canvas.speed1 * dt
+      canvas.angle2 += canvas.speed2 * dt
+      
+      // Find the core to get member count
+      const core = clusters.current.find(c => c.id === coreId)
+      if (core) {
+        const totalData = core.members || 0
+        // Split data between two canvases
+        canvas.dataCount1 = Math.min(Math.ceil(totalData / 2), canvas.maxDataPerCanvas)
+        canvas.dataCount2 = Math.min(Math.floor(totalData / 2), canvas.maxDataPerCanvas)
+      } else {
+        // Core no longer exists, remove canvas
+        clusteredCanvases.current.delete(coreId)
+      }
+    }
+  }
+  
   function updateZoom() {
     const w = worldW.current || (typeof window !== 'undefined' ? window.innerWidth : 1200)
     const h = worldH.current || (typeof window !== 'undefined' ? window.innerHeight : 800)
@@ -553,8 +617,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       let coreRadius = orbitalRadii.current[i]
       if (coreRadius === undefined) {
         const baseRadius = orbitalRadius.current
-      const levelFactor = (cluster.level - 1) * 0.08
-      const stackFactor = (cluster.stackCount || 1) > 1 ? 0.05 : 0
+        const levelFactor = (cluster.level - 1) * 0.08
+        const stackFactor = (cluster.stackCount || 1) > 1 ? 0.05 : 0
         const randomVariation = (Math.random() - 0.5) * 0.1
         const radiusMultiplier = 0.95 + levelFactor + stackFactor + randomVariation
         coreRadius = baseRadius * radiusMultiplier
@@ -676,6 +740,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         age: 0,
         alpha: rand(0.18, 0.48),
         rotationOffset: Math.random() * Math.PI * 2, // Random offset for star rotation sync
+        fadeState: 'visible', // Start visible
+        fadeProgress: 1.0, // Fully visible
       }
     }
     points.current = arr
@@ -1189,6 +1255,34 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       }
     }
 
+    // Update clustered canvases (two-canvas system)
+    updateClusteredCanvases(dt)
+
+    // Update ambient fade states for smooth culling
+    for (let i = 0; i < points.current.length; i++) {
+      const p = points.current[i]
+      if (p.state === 'ambient') {
+        // Initialize fade state if not set
+        if (!p.fadeState) {
+          p.fadeState = 'visible'
+          p.fadeProgress = 1.0
+        }
+        
+        // Update fade progress
+        if (p.fadeState === 'fadeOut') {
+          p.fadeProgress = Math.max(0, p.fadeProgress! - dt * 2) // Fade out over 0.5 seconds
+          if (p.fadeProgress <= 0) {
+            p.fadeState = 'hidden'
+          }
+        } else if (p.fadeState === 'fadeIn') {
+          p.fadeProgress = Math.min(1, p.fadeProgress! + dt * 2) // Fade in over 0.5 seconds
+          if (p.fadeProgress >= 1) {
+            p.fadeState = 'visible'
+          }
+        }
+      }
+    }
+
     // Outlier spawn: rate + quantity
     const currentOutliers = points.current.reduce((n, p) => n + (p.state === "outlier" ? 1 : 0), 0)
     spawnCooldown.current -= dt
@@ -1204,7 +1298,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         const idx = findAmbientIndex()
         if (idx !== -1) {
           p = points.current[idx]
-        } else {
+          } else {
           // Fallback: create a new point to ensure outliers always spawn
           const newId = points.current.length
           p = {
@@ -1228,7 +1322,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         p.y = Math.max(TOP_EXCLUDE + 10, SPAWN_MARGIN + Math.random() * Math.max(0, H - SPAWN_MARGIN * 2 - TOP_EXCLUDE))
         const baseV = 75 + Math.random() * 25
         p.vx = fromLeft ? baseV : -baseV
-        p.vy = rand(-15, 15)
+            p.vy = rand(-15, 15)
       }
       spawnCooldown.current = rand(baseInterval * 0.6, baseInterval * 1.4)
     }
@@ -1567,7 +1661,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const visibleCoreCount = clusters.current.filter(c => c.isVisible !== false).length
     const coreReserveCap = extremeMode.current ? GAME_CONFIG.CORE_RESERVE_CAP_EXTREME : (lowQualityMode.current ? GAME_CONFIG.CORE_RESERVE_CAP_LOW : GAME_CONFIG.CORE_RESERVE_CAP_HIGH)
     const reservedForCores = Math.min(visibleCoreCount * 2, coreReserveCap) // 2 draws per core (halo + dot)
-    const reservedForOutliers = 120 // Generous reserve so outliers/capturing never cull
+    const reservedForOutliers = 300 // Increased from 120 for all settings
     const availableForData = Math.max(50, drawBuffer.length - reservedForCores - reservedForOutliers - 10)
 
     // Initialize rendering stats
@@ -1582,118 +1676,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
     const cullMargin = 50 // Extra margin for viewport culling
 
-    // 1. PRIORITY: Always render outliers first (flying data - most important for gameplay!)
-    for (let i = 0; i < points.current.length; i++) {
-      const p = points.current[i]
-      if (p.state === "outlier" || p.state === 'capturing') {
-        renderStats.outliers.total++
-        if (n >= drawBuffer.length - reservedForCores - 5) break
-
-        const rec = drawBuffer[n++]
-        rec.x = p.x
-        rec.y = p.y
-        rec.radius = p.state === 'capturing' ? 2.4 : 2.6
-        rec.alpha = Math.max(0.9, p.alpha)
-        rec.color = 4
-        rec.shape = 'icon'
-        rec.variant = p.id & 3
-        rec.glow = p.state === 'capturing' ? 0.5 : 1
-        renderStats.outliers.rendered++
-      }
-    }
-
-    // 2. PRIORITY: Background ambient data (throttled as core total grows)
-    let ambientCount = 0
-      // Use the peak core total reached to determine ambient quota
-      // New ramp: from 0->200 peak cores, drop to 20% linearly. From 200->1010, ease-out from 20% to 0.
-      const peakAmbient = maxTotalCores.current
-      let ambientFactor = 1
-      if (peakAmbient <= 0) {
-        ambientFactor = 1
-      } else if (peakAmbient < 200) {
-        ambientFactor = 1 - 0.8 * (peakAmbient / 200)
-      } else if (peakAmbient < 1010) {
-        const t = (peakAmbient - 200) / (1010 - 200)
-        const easeOut = 1 - Math.pow(1 - t, 2) // quadratic ease-out
-        ambientFactor = 0.2 * (1 - easeOut)
-      } else {
-        ambientFactor = 0
-      }
-    // Density-aware cap: clamp ambient by viewport area to avoid clutter on mobile
-    // Choose a target density (points per pixel). Lower for mobile to reduce clutter.
-    const area = Math.max(1, W * H)
-    const targetDensity = isMobileRef.current ? 0.00003 : 0.00008 // tuned: ~24 vs ~64 per 800x1000
-    const densityCap = Math.floor(area * targetDensity)
-    const maxAmbient = Math.max(0, Math.min(densityCap, Math.floor(availableForData * 0.6 * ambientFactor)))
-    renderStats.ambient.limit = maxAmbient
-    
-    for (let i = 0; i < points.current.length && ambientCount < maxAmbient; i++) {
-      const p = points.current[i]
-      if (p.state === "ambient") {
-        renderStats.ambient.total++
-        // Viewport culling in low quality mode
-        if (lowQualityMode.current &&
-            (p.x < -cullMargin || p.x > W + cullMargin ||
-             p.y < -cullMargin || p.y > H + cullMargin)) {
-          continue
-        }
-        if (n >= drawBuffer.length - reservedForCores - 5) break
-
-        const rec = drawBuffer[n++]
-        rec.x = p.x
-        rec.y = p.y
-        rec.radius = 1.6
-        rec.alpha = p.alpha
-        rec.color = 1
-        rec.shape = 'icon'
-        rec.variant = -1 // Mark as ambient
-        rec.glow = 0
-        ambientCount++
-        renderStats.ambient.rendered++
-      }
-    }
-
-    // 3. PRIORITY: Orbiting data (limit per core to prevent buffer overflow)
-    const baseOrbitMax = extremeMode.current ? 8 : (lowQualityMode.current ? 8 : 12)
-    const decay = extremeMode.current ? 40 : (lowQualityMode.current ? 15 : 25)
-    const minOrbit = extremeMode.current ? 1 : 2
-    const maxOrbitingPerCore = Math.max(minOrbit, Math.floor(baseOrbitMax - visibleCoreCount / decay)) // Reduce as cores increase, higher in high-quality
-    const clusteredByCore = new Map<number, number>()
-    renderStats.clustered.limit = visibleCoreCount * maxOrbitingPerCore
-
-    for (let i = 0; i < points.current.length; i++) {
-      const p = points.current[i]
-      if (p.state === "clustered" && p.clusterId != null) {
-        renderStats.clustered.total++
-        const coreId = p.clusterId
-        const currentCount = clusteredByCore.get(coreId) || 0
-
-        if (currentCount < maxOrbitingPerCore && n < drawBuffer.length - reservedForCores - 5) {
-          // Viewport culling
-          if (lowQualityMode.current &&
-              (p.x < -cullMargin || p.x > W + cullMargin ||
-               p.y < -cullMargin || p.y > H + cullMargin)) {
-            continue
-          }
-
-          const rec = drawBuffer[n++]
-          rec.x = p.x
-          rec.y = p.y
-          rec.radius = 1.8
-          rec.alpha = p.alpha
-          rec.color = 2
-          rec.shape = 'icon'
-          rec.variant = p.id & 3
-          rec.glow = 0
-          clusteredByCore.set(coreId, currentCount + 1)
-          renderStats.clustered.rendered++
-        }
-      }
-    }
-
-    // 4. PRIORITY: Always render cores (most critical for gameplay!)
-    let coreBaseRecordsDrawn = 0 // count only halo+dot pairs against reserved core budget
-    // 3b. Render unlockables first (so they appear beneath core detail)
+    // 1. PRIORITY: Unlockables (special collectible sprites)
     if (unlockables.current.length > 0) {
       for (let i = 0; i < unlockables.current.length; i++) {
         if (n >= drawBuffer.length - 6) break
@@ -1718,6 +1701,29 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         renderStats.unlockables.rendered++
       }
     }
+
+    // 2. PRIORITY: Outliers (flying data - highest priority for gameplay!)
+    for (let i = 0; i < points.current.length; i++) {
+      const p = points.current[i]
+      if (p.state === "outlier" || p.state === 'capturing') {
+        renderStats.outliers.total++
+        if (n >= drawBuffer.length - reservedForCores - 5) break
+
+          const rec = drawBuffer[n++]
+          rec.x = p.x
+          rec.y = p.y
+        rec.radius = p.state === 'capturing' ? 2.4 : 2.6
+        rec.alpha = Math.max(0.9, p.alpha)
+        rec.color = 4
+          rec.shape = 'icon'
+          rec.variant = p.id & 3
+        rec.glow = p.state === 'capturing' ? 0.5 : 1
+        renderStats.outliers.rendered++
+      }
+    }
+
+    // 3. PRIORITY: Cores (main gameplay elements)
+    let coreBaseRecordsDrawn = 0 // count only halo+dot pairs against reserved core budget
     for (let i = 0; i < clusters.current.length; i++) {
       const c = clusters.current[i]
       if (c.isVisible === false) continue // Skip stacked/hidden cores
@@ -1752,7 +1758,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
       // Count base pair against core budget
       coreBaseRecordsDrawn += 2
-      renderStats.cores.rendered += 1 // Count cores, not draw records
+      renderStats.cores.rendered += 2
 
       // Visualize stacked cores with multiple small offset dots arranged in up to 3 rings
       const extraStacks = Math.max(0, (c.stackCount || 1) - 1)
@@ -1769,42 +1775,317 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         const ringDefs: { count: number; r: number; alpha: number }[] = []
         if (remaining > 0) {
           const c1 = Math.min(remaining, ring1Cap)
-          ringDefs.push({ count: c1, r: baseRadius * 1.2, alpha: 0.85 })
+          ringDefs.push({ count: c1, r: baseRadius * 0.6, alpha: 0.4 })
           remaining -= c1
         }
         if (remaining > 0) {
           const c2 = Math.min(remaining, ring2Cap - ring1Cap)
-          ringDefs.push({ count: c2, r: baseRadius * 1.7, alpha: 0.8 })
+          ringDefs.push({ count: c2, r: baseRadius * 0.8, alpha: 0.3 })
           remaining -= c2
         }
         if (remaining > 0) {
           const c3 = Math.min(remaining, ring3Cap - ring2Cap)
-          ringDefs.push({ count: c3, r: baseRadius * 2.2, alpha: 0.75 })
-          remaining -= c3
+          ringDefs.push({ count: c3, r: baseRadius * 1.0, alpha: 0.2 })
         }
 
-        let angleSeed = (i * 0.8) % (Math.PI * 2)
+        let angleSeed = Math.random() * Math.PI * 2
         for (const ring of ringDefs) {
-          const step = (Math.PI * 2) / Math.max(1, ring.count)
-          for (let k = 0; k < ring.count; k++) {
-            if (n >= drawBuffer.length - 2) break
-            const a = angleSeed + k * step
-            const dx = Math.cos(a) * ring.r
-            const dy = Math.sin(a) * ring.r
-            const d = drawBuffer[n++]
-            d.x = c.x + dx
-            d.y = c.y + dy
-            d.radius = baseRadius * 0.8
-            d.alpha = ring.alpha
-            d.color = c.colorIndex
-            d.shape = 'core'
-            d.variant = (i + k + 1) & 3
-            d.glow = dot.glow
+          for (let k = 0; k < ring.count && n < drawBuffer.length - 1; k++) {
+            const angle = angleSeed + (k / ring.count) * Math.PI * 2
+            const offsetX = Math.cos(angle) * ring.r
+            const offsetY = Math.sin(angle) * ring.r
+
+            const stackDot = drawBuffer[n++]
+            stackDot.x = c.x + offsetX
+            stackDot.y = c.y + offsetY
+            stackDot.radius = baseRadius * 0.4
+            stackDot.alpha = ring.alpha
+            stackDot.color = c.colorIndex
+            stackDot.shape = 'core'
+            stackDot.variant = Math.max(1, Math.min(5, c.level))
+            stackDot.glow = 0
           }
           angleSeed += 0.42 // small rotation between rings
         }
       }
     }
+
+    // 4. PRIORITY: Clustered data (two-canvas system)
+    // Always 2 canvases per core, no orbit max needed
+    renderStats.clustered.limit = visibleCoreCount * 2
+
+    // Render clustered canvases for each core
+    for (let i = 0; i < clusters.current.length; i++) {
+      const c = clusters.current[i]
+      if (c.isVisible === false) continue // Skip stacked/hidden cores
+      
+      const canvas = getClusteredCanvas(c.id)
+      
+      // Canvas 1
+      if (canvas.dataCount1 > 0 && n < drawBuffer.length - reservedForCores - 5) {
+        // Calculate canvas center position (orbiting around core)
+        const canvasX = c.x + Math.cos(canvas.angle1) * canvas.distance1
+        const canvasY = c.y + Math.sin(canvas.angle1) * canvas.distance1
+        
+        // Viewport culling
+        if (lowQualityMode.current &&
+            (canvasX < -cullMargin || canvasX > W + cullMargin ||
+             canvasY < -cullMargin || canvasY > H + cullMargin)) {
+          // Skip this canvas
+        } else {
+          // Render data field centered on the core (not canvas center)
+          for (let j = 0; j < canvas.dataCount1 && n < drawBuffer.length - reservedForCores - 5; j++) {
+            // Create a more spread out, natural-looking field around the CORE with drag effect
+            const angle = (j / canvas.dataCount1) * Math.PI * 2 + (canvas.coreId * 0.3) + canvas.angle1 * 0.5 // Rotate with orbit
+            const baseRadius = 45 + Math.sin(j * 0.8) * 12 // Slightly larger base radius for more spread
+            // Add drag/bounce effect - points lag behind the core's movement
+            const dragOffset = Math.sin(canvas.angle1 * 2 + j * 0.5) * 8 // Dynamic bounce based on orbit position
+            const orbitRadius = baseRadius + dragOffset // Combine base radius with drag effect
+            const offsetX = Math.cos(angle) * orbitRadius
+            const offsetY = Math.sin(angle) * orbitRadius
+            
+            const rec = drawBuffer[n++]
+            rec.x = c.x + offsetX // Center on CORE position
+            rec.y = c.y + offsetY
+            rec.radius = 1.6 // Same as ambient data
+            rec.alpha = 0.5 + Math.sin(j * 0.3) * 0.2 // Vary alpha for depth
+            rec.color = 2 // Same as old clustered data
+            rec.shape = 'icon'
+            rec.variant = -1 // Mark as clustered canvas
+            rec.glow = 0
+            renderStats.clustered.rendered++
+          }
+        }
+      }
+      
+      // Canvas 2
+      if (canvas.dataCount2 > 0 && n < drawBuffer.length - reservedForCores - 5) {
+        // Calculate canvas center position (orbiting around core)
+        const canvasX2 = c.x + Math.cos(canvas.angle2) * canvas.distance2
+        const canvasY2 = c.y + Math.sin(canvas.angle2) * canvas.distance2
+        
+        // Viewport culling
+        if (lowQualityMode.current &&
+            (canvasX2 < -cullMargin || canvasX2 > W + cullMargin ||
+             canvasY2 < -cullMargin || canvasY2 > H + cullMargin)) {
+          // Skip this canvas
+        } else {
+          // Render data field centered on the core (not canvas center)
+          for (let j = 0; j < canvas.dataCount2 && n < drawBuffer.length - reservedForCores - 5; j++) {
+            // Create a more spread out, natural-looking field around the CORE with drag effect
+            const angle = (j / canvas.dataCount2) * Math.PI * 2 + (canvas.coreId * 0.3) + canvas.angle2 * 0.5 // Rotate with orbit
+            const baseRadius = 45 + Math.sin(j * 0.8) * 12 // Slightly larger base radius for more spread
+            // Add drag/bounce effect - points lag behind the core's movement
+            const dragOffset = Math.sin(canvas.angle2 * 2 + j * 0.5) * 8 // Dynamic bounce based on orbit position
+            const orbitRadius = baseRadius + dragOffset // Combine base radius with drag effect
+            const offsetX = Math.cos(angle) * orbitRadius
+            const offsetY = Math.sin(angle) * orbitRadius
+            
+            const rec = drawBuffer[n++]
+            rec.x = c.x + offsetX // Center on CORE position
+            rec.y = c.y + offsetY
+            rec.radius = 1.6 // Same as ambient data
+            rec.alpha = 0.5 + Math.sin(j * 0.3) * 0.2 // Vary alpha for depth
+            rec.color = 2 // Same as old clustered data
+            rec.shape = 'icon'
+            rec.variant = -1 // Mark as clustered canvas
+            rec.glow = 0
+            renderStats.clustered.rendered++
+          }
+        }
+      }
+    }
+
+    // 5. PRIORITY: Background ambient data (throttled as core total grows)
+    let ambientCount = 0
+      // Use the peak core total reached to determine ambient quota
+      // Smooth decrease from 0 to 1000 cores (removed 200-core speedup)
+      const peakAmbient = maxTotalCores.current
+      const t = Math.min(peakAmbient / 1000, 1)
+      const ambientFactor = 1 - (0.8 * t) // Linear decrease from 1.0 to 0.2
+    // Density-aware cap: clamp ambient by viewport area to avoid clutter on mobile
+    // Choose a target density (points per pixel) based on performance mode
+    const area = Math.max(1, W * H)
+    let targetDensity: number
+    if (isMobileRef.current) {
+      targetDensity = 0.00002 // Lowest setting for mobile
+    } else if (extremeMode.current) {
+      targetDensity = 0.00012 // Highest setting for extreme mode
+    } else if (lowQualityMode.current) {
+      targetDensity = 0.00002 // Lowest setting for low quality
+    } else {
+      targetDensity = 0.00008 // High setting for normal quality (same as current)
+    }
+    const densityCap = Math.floor(area * targetDensity)
+    const maxAmbient = Math.max(0, Math.min(densityCap, Math.floor(availableForData * 0.6 * ambientFactor)))
+    renderStats.ambient.limit = maxAmbient
+    
+    // First pass: determine which ambient points should be visible
+    const ambientPointsToRender: Point[] = []
+    for (let i = 0; i < points.current.length; i++) {
+      const p = points.current[i]
+      if (p.state === "ambient") {
+        renderStats.ambient.total++
+        
+        // Initialize fade state if not set
+        if (!p.fadeState) {
+          p.fadeState = 'visible'
+          p.fadeProgress = 1.0
+        }
+        
+        // Determine if this point should be visible based on limits
+        const shouldBeVisible = ambientCount < maxAmbient && 
+          (!lowQualityMode.current || 
+           (p.x >= -cullMargin && p.x <= W + cullMargin &&
+            p.y >= -cullMargin && p.y <= H + cullMargin))
+        
+        // Trigger fade transitions
+        if (shouldBeVisible && p.fadeState === 'hidden') {
+          p.fadeState = 'fadeIn'
+          p.fadeProgress = 0.0
+        } else if (!shouldBeVisible && (p.fadeState === 'visible' || p.fadeState === 'fadeIn')) {
+          p.fadeState = 'fadeOut'
+        }
+        
+        // Only render if not completely hidden
+        if (p.fadeState !== 'hidden') {
+          ambientPointsToRender.push(p)
+          if (shouldBeVisible) ambientCount++
+        }
+      }
+    }
+    
+    // Second pass: render ambient points with fade alpha
+    for (const p of ambientPointsToRender) {
+      if (n >= drawBuffer.length - reservedForCores - 5) break
+
+      const rec = drawBuffer[n++]
+      rec.x = p.x
+      rec.y = p.y
+      rec.radius = 1.6
+      rec.alpha = p.alpha * (p.fadeProgress || 1.0) // Apply fade progress
+      rec.color = 1
+      rec.shape = 'icon'
+      rec.variant = -1 // Mark as ambient
+      rec.glow = 0
+      renderStats.ambient.rendered++
+    }
+
+    // 3. PRIORITY: Two-canvas clustered data system (max 2 renders per core)
+    // Always 2 canvases per core, no orbit max needed
+    renderStats.clustered.limit = visibleCoreCount * 2
+
+    // Render clustered canvases for each core
+    for (let i = 0; i < clusters.current.length; i++) {
+      const c = clusters.current[i]
+      if (c.isVisible === false) continue // Skip stacked/hidden cores
+      
+      const canvas = getClusteredCanvas(c.id)
+      
+      // Canvas 1
+      if (canvas.dataCount1 > 0 && n < drawBuffer.length - reservedForCores - 5) {
+        // Calculate canvas center position (orbiting around core)
+        const canvasX = c.x + Math.cos(canvas.angle1) * canvas.distance1
+        const canvasY = c.y + Math.sin(canvas.angle1) * canvas.distance1
+        
+        // Viewport culling
+        if (lowQualityMode.current &&
+            (canvasX < -cullMargin || canvasX > W + cullMargin ||
+             canvasY < -cullMargin || canvasY > H + cullMargin)) {
+          // Skip this canvas
+        } else {
+          // Render data field centered on the core (not canvas center)
+          for (let j = 0; j < canvas.dataCount1 && n < drawBuffer.length - reservedForCores - 5; j++) {
+            // Create a more spread out, natural-looking field around the CORE with drag effect
+            const angle = (j / canvas.dataCount1) * Math.PI * 2 + (canvas.coreId * 0.3) + canvas.angle1 * 0.5 // Rotate with orbit
+            const baseRadius = 45 + Math.sin(j * 0.8) * 12 // Slightly larger base radius for more spread
+            // Add drag/bounce effect - points lag behind the core's movement
+            const dragOffset = Math.sin(canvas.angle1 * 2 + j * 0.5) * 8 // Dynamic bounce based on orbit position
+            const orbitRadius = baseRadius + dragOffset // Combine base radius with drag effect
+            const offsetX = Math.cos(angle) * orbitRadius
+            const offsetY = Math.sin(angle) * orbitRadius
+            
+            const rec = drawBuffer[n++]
+            rec.x = c.x + offsetX // Center on CORE position
+            rec.y = c.y + offsetY
+            rec.radius = 1.6 // Same as ambient data
+            rec.alpha = 0.5 + Math.sin(j * 0.3) * 0.2 // Vary alpha for depth
+            rec.color = 2 // Same as old clustered data
+            rec.shape = 'icon'
+            rec.variant = -1 // Mark as clustered canvas
+            rec.glow = 0
+            renderStats.clustered.rendered++
+          }
+        }
+      }
+      
+      // Canvas 2
+      if (canvas.dataCount2 > 0 && n < drawBuffer.length - reservedForCores - 5) {
+        // Calculate canvas center position (orbiting around core)
+        const canvasX2 = c.x + Math.cos(canvas.angle2) * canvas.distance2
+        const canvasY2 = c.y + Math.sin(canvas.angle2) * canvas.distance2
+        
+        // Viewport culling
+        if (lowQualityMode.current &&
+            (canvasX2 < -cullMargin || canvasX2 > W + cullMargin ||
+             canvasY2 < -cullMargin || canvasY2 > H + cullMargin)) {
+          // Skip this canvas
+        } else {
+          // Render data field centered on the core (not canvas center)
+          for (let j = 0; j < canvas.dataCount2 && n < drawBuffer.length - reservedForCores - 5; j++) {
+            // Create a more spread out, natural-looking field around the CORE with drag effect
+            const angle = (j / canvas.dataCount2) * Math.PI * 2 + (canvas.coreId * 0.3) + canvas.angle2 * 0.5 // Rotate with orbit
+            const baseRadius = 45 + Math.sin(j * 0.8) * 12 // Slightly larger base radius for more spread
+            // Add drag/bounce effect - points lag behind the core's movement
+            const dragOffset = Math.sin(canvas.angle2 * 2 + j * 0.5) * 8 // Dynamic bounce based on orbit position
+            const orbitRadius = baseRadius + dragOffset // Combine base radius with drag effect
+            const offsetX = Math.cos(angle) * orbitRadius
+            const offsetY = Math.sin(angle) * orbitRadius
+            
+            const rec = drawBuffer[n++]
+            rec.x = c.x + offsetX // Center on CORE position
+            rec.y = c.y + offsetY
+            rec.radius = 1.6 // Same as ambient data
+            rec.alpha = 0.5 + Math.sin(j * 0.3) * 0.2 // Vary alpha for depth
+            rec.color = 2 // Same as old clustered data
+            rec.shape = 'icon'
+            rec.variant = -1 // Mark as clustered canvas
+            rec.glow = 0
+            renderStats.clustered.rendered++
+          }
+        }
+      }
+    }
+
+    // Core stacking system - stack same-level cores when approaching reserve cap
+    if (reservedForCores >= coreReserveCap - 50) {
+      const coresByLevel = new Map<number, typeof clusters.current>()
+      for (const core of clusters.current) {
+        if (core.isVisible !== false) {
+          if (!coresByLevel.has(core.level)) {
+            coresByLevel.set(core.level, [])
+          }
+          coresByLevel.get(core.level)!.push(core)
+        }
+      }
+      
+      // Stack cores of the same level (keep first, stack rest)
+      for (const [level, cores] of coresByLevel) {
+        if (cores.length > 1) {
+          const primaryCore = cores[0]
+          const coresToStack = cores.slice(1)
+          
+          for (const core of coresToStack) {
+            // Stack the core
+            core.isVisible = false
+            primaryCore.stackCount = (primaryCore.stackCount || 1) + 1
+            // Transfer members to primary core
+            primaryCore.members = (primaryCore.members || 0) + (core.members || 0)
+          }
+        }
+      }
+    }
+
 
     snapshot.current.points.length = n
     // Assign references without reallocating

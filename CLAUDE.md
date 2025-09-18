@@ -16,7 +16,12 @@ This is a Next.js 15 portfolio website for Nicholas Dudczyk (dudz.pro) featuring
 
 ## Key Changes (2025-09-17)
 
-- **Unlockables**: Large drifting shapes (locked sprites) spawn ~every 60s, spin, and shake on click. Each click increases cracking. On final click, a short break animation plays and the sprite unlocks permanently. A toast shows “Unlocked: <Name>”.
+- **Performance Mega Patch**: Complete rework of rendering system with two-canvas clustered data, performance mode rebalancing, core stacking, and smooth ambient culling.
+- **Two-Canvas System**: Replaced individual orbiting data points with 2 canvases per core (max 2 renders vs 9+ previously), reducing render load by 83%.
+- **Performance Modes**: Rebalanced Low/High/Extreme modes with ambient density settings and core stacking when approaching limits.
+- **Smooth Culling**: Ambient data now fades in/out instead of popping, with fade states and progress tracking.
+- **Priority System**: New rendering order: Unlockables → Outliers → Cores → Clustered → Ambient.
+- **Unlockables**: Large drifting shapes (locked sprites) spawn ~every 60s, spin, and shake on click. Each click increases cracking. On final click, a short break animation plays and the sprite unlocks permanently. A toast shows "Unlocked: <Name>".
 - **Special Effects**: Neon RGB and Custom Shift (palette-based). User-adjustable shift speed is persisted. Unlockable fill and glow match the active shift color.
 - **Cosmetics**: Normalized persistence; `galaxy.cosmetics` always includes `coreColors[5]`, `ambientColors`, `coreSprites[5]`, `unlockedSprites`, `specialEffects`. UI updates immediately when unlocks occur.
 - **Clear Save Data**: Full reset (tokens/iq/upgrades), clears total collected, spawns exactly one L1 core, locks sprites except `database`, resets cosmetics, and respects `strictLocked` baseline in getters.
@@ -266,6 +271,36 @@ const step = () => {
 
 ## Performance Architecture
 
+### Performance Mega Patch (2025-09-17)
+Complete rework of the rendering system for massive performance improvements:
+
+#### Two-Canvas Clustered Data System
+- **Old System**: Up to 12 individual orbiting data points per core (12,000+ potential renders)
+- **New System**: 2 canvases per core, each rendering up to 5 connected data points (2,000 max renders)
+- **Performance Gain**: 83% reduction in render load
+- **Visual Quality**: Maintains exact same sprite size, color, and shape as ambient data
+- **Dynamic Behavior**: Different rotation speeds and offset distances for visual variety
+
+#### Performance Mode Rebalancing
+- **Low Quality**: 300 core reserve, 0.00002 ambient density, aggressive culling
+- **High Quality**: 1,200 core reserve, 0.00008 ambient density, moderate culling  
+- **Extreme Mode**: 5,200 core reserve, 0.00012 ambient density, gentle culling
+- **Core Stacking**: Same-level cores stack when approaching reserve cap (within 50 draws)
+
+#### Smooth Ambient Culling
+- **Fade States**: `fadeIn`, `visible`, `fadeOut`, `hidden` with progress tracking
+- **Smooth Transitions**: 0.5-second fade in/out instead of pop in/out
+- **Ambient Factor**: Smooth linear decrease from 0 to 1000 cores (removed 200-core speedup)
+- **Outlier Limit**: Increased to 300 records for all settings
+
+#### Priority System Rework
+New rendering order ensures critical elements are never culled:
+1. **Unlockables** - special collectible sprites
+2. **Outliers** - flying data (highest priority for gameplay)
+3. **Cores** - main gameplay elements
+4. **Clustered data** - two-canvas orbiting system
+5. **Ambient data** - background particles with smooth culling
+
 ### FPS Management
 - **Default**: 30 FPS for battery life and performance
 - **Adjustable**: 30/60 FPS via HUD settings
@@ -290,6 +325,15 @@ const MAX_CORES = 1000          // Maximum cores before splitting stops
 const STACK_THRESHOLD = 8       // L1-L4 cores stack at 8+ cores
 const L5_STACK_THRESHOLD = 3    // L5+ cores stack at 3+ cores
 const DRAW_BUFFER_SIZE = 584    // Fixed render buffer (AMBIENT_COUNT + 64)
+
+// Performance Mega Patch Constants
+const CORE_RESERVE_CAP_LOW = 300      // Low quality mode core reserve
+const CORE_RESERVE_CAP_HIGH = 1200    // High quality mode core reserve  
+const CORE_RESERVE_CAP_EXTREME = 5200 // Extreme mode core reserve
+const OUTLIER_RESERVE = 300           // Increased outlier limit for all modes
+const MAX_CANVASES_PER_CORE = 2       // Two-canvas clustered data system
+const MAX_DATA_PER_CANVAS = 5         // Max data points per canvas
+const FADE_SPEED = 2.0                // Fade in/out speed (0.5 seconds)
 
 // Orbital Animation (Enhanced)
 const orbitalSpeeds = useRef<number[]>([])   // Individual orbital speed per core
