@@ -64,8 +64,9 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
     const canvas = canvasRef.current
     if (!canvas || !api?.clickAt || !api?.startDrag || !api?.updateDrag || !api?.endDrag) return
 
-    let dragStartTime = 0
     let isDragging = false
+    let hasMoved = false
+    let dragStartCoords = { x: 0, y: 0 }
 
     const getCanvasCoords = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect()
@@ -79,19 +80,9 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       if (!enabled) return
 
       const coords = getCanvasCoords(e.clientX, e.clientY)
-      dragStartTime = Date.now()
-
-      // Try to start dragging first (longer press for drag)
-      // If no draggable point found, it will fall back to click
-      setTimeout(() => {
-        if (!isDragging && Date.now() - dragStartTime > 150) { // 150ms delay to distinguish click from drag
-          const dragStarted = api.startDrag(coords.x, coords.y)
-          if (dragStarted) {
-            isDragging = true
-            canvas.setPointerCapture(e.pointerId)
-          }
-        }
-      }, 150)
+      dragStartCoords = coords
+      isDragging = false
+      hasMoved = false
     }
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -99,36 +90,35 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
 
       const coords = getCanvasCoords(e.clientX, e.clientY)
 
-      if (isDragging) {
-        // Update drag position
-        api.updateDrag(coords.x, coords.y)
-      } else if (Date.now() - dragStartTime > 150) {
-        // Late start drag if we haven't started yet but moved enough
-        const dragStarted = api.startDrag(coords.x, coords.y)
+      // Check if we've moved enough to consider this a drag
+      const moveDistance = Math.hypot(coords.x - dragStartCoords.x, coords.y - dragStartCoords.y)
+      if (moveDistance > 10 && !isDragging) { // 10px threshold
+        // Try to start dragging
+        const dragStarted = api.startDrag(dragStartCoords.x, dragStartCoords.y)
         if (dragStarted) {
           isDragging = true
           canvas.setPointerCapture(e.pointerId)
         }
+      }
+
+      if (isDragging) {
+        hasMoved = true
+        api.updateDrag(coords.x, coords.y)
       }
     }
 
     const handlePointerUp = (e: PointerEvent) => {
       if (!enabled) return
 
-      const coords = getCanvasCoords(e.clientX, e.clientY)
-      const dragDuration = Date.now() - dragStartTime
-
       if (isDragging) {
         // End drag
         api.endDrag()
         canvas.releasePointerCapture(e.pointerId)
-      } else if (dragDuration < 150) {
-        // Quick click
-        api.clickAt(coords.x, coords.y)
+        isDragging = false
+      } else if (!hasMoved) {
+        // Quick click without significant movement
+        api.clickAt(dragStartCoords.x, dragStartCoords.y)
       }
-
-      isDragging = false
-      dragStartTime = 0
     }
 
     const handlePointerCancel = (e: PointerEvent) => {
@@ -137,7 +127,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
         canvas.releasePointerCapture(e.pointerId)
       }
       isDragging = false
-      dragStartTime = 0
+      hasMoved = false
     }
 
     // Add pointer events for better cross-device support
