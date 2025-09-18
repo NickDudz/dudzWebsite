@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import type { Upgrades } from "../hooks/useClusteringGalaxy"
 // Use shared math for costs
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -21,6 +21,46 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
   const [buyQuantity, setBuyQuantity] = useState(1)
   const [openSections, setOpenSections] = useState<{ swarm: boolean; tokens: boolean; iq: boolean; debug: boolean }>({ swarm: true, tokens: true, iq: true, debug: false })
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number; visible: boolean }>({ text: '', x: 0, y: 0, visible: false })
+  const [panelPos, setPanelPos] = useState<{ top: number; right: number } | null>(null)
+  const [compactSidebar, setCompactSidebar] = useState(false)
+
+  // Hide external toggle button when sidebar mode is active
+  useEffect(() => {
+    const el = document.getElementById('galaxy-ui-toggle') as HTMLElement | null
+    if (!el) return
+    const prev = el.style.display
+    if (sidebar) {
+      el.style.display = 'none'
+    } else {
+      el.style.display = prev || ''
+    }
+    return () => {
+      if (el) el.style.display = prev || ''
+    }
+  }, [sidebar])
+
+  useEffect(() => {
+    const updatePos = () => {
+      try {
+        const anchor = document.getElementById('galaxy-ui-toggle')
+        if (!anchor) return
+        const r = anchor.getBoundingClientRect()
+        // Place panel 8px below the toggle, align its right edge with the toggle's right edge
+        const top = Math.round(r.bottom + 8)
+        const right = Math.max(12, Math.round(window.innerWidth - r.right))
+        setPanelPos({ top, right })
+      } catch {}
+    }
+    // Compute when opening and on layout changes
+    updatePos()
+    const onResize = () => updatePos()
+    window.addEventListener('resize', onResize)
+    window.addEventListener('scroll', onResize, { passive: true })
+    return () => {
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('scroll', onResize as any)
+    }
+  }, [collapsed])
   const rows = useMemo(() => ([
     { key: "spawnRate", label: "Data Ingest", desc: "- spawn chance frequency" },
     { key: "spawnQty", label: "Spawn Qty", desc: "spawn multiple per wave (max 5)" },
@@ -425,22 +465,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
     )
   }
 
-  // Top-right trigger button (dropdown opener)
-  const trigger = (
-    <div className="fixed top-4 right-4 z-30 pointer-events-auto">
-      <button
-        onClick={() => onCollapsedChange && onCollapsedChange(!collapsed)}
-        className="group inline-flex items-center gap-2 rounded-md border border-zinc-700/50 bg-zinc-900/70 px-3 py-2 text-[11px] font-medium text-zinc-300 shadow-sm backdrop-blur-sm transition hover:bg-zinc-800/70 hover:border-zinc-600/60"
-        aria-expanded={!collapsed}
-        aria-controls="galaxy-ui-panel"
-      >
-        <span style={coreGradientStyle} className="tracking-tight" suppressHydrationWarning>Data Continuum Idle</span>
-        <svg className="h-3 w-3 text-zinc-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-          <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.585l3.71-3.354a.75.75 0 011.04 1.08l-4.24 3.833a.75.75 0 01-1.04 0L5.21 8.29a.75.75 0 01.02-1.08z" />
-        </svg>
-      </button>
-    </div>
-  )
+  // Trigger button removed - now handled in page.tsx
 
   // Core colors matching the game engine - blue and purple gradient, no dots for L1-L5
   // (defined above)
@@ -451,16 +476,58 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="font-semibold text-sm" style={coreGradientStyle} suppressHydrationWarning>Data Continuum Idle</div>
-          <button
-            onClick={() => onSidebarToggle && onSidebarToggle()}
-            className="inline-flex items-center justify-center w-7 h-7 rounded border border-zinc-600/70 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60"
-            aria-label={sidebar ? 'Switch to dropdown layout' : 'Expand to sidebar layout'}
-            title={sidebar ? 'Switch to dropdown layout' : 'Expand to sidebar layout'}
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-              <path d="M3 5h14v2H3V5zm0 4h9v2H3V9zm0 4h14v2H3v-2z" />
-            </svg>
-          </button>
+          <div className="inline-flex items-center gap-2">
+            {sidebar && (
+              <>
+                {/* Close (X) button - exits sidebar and shows dropdown toggle again */}
+                <button
+                  onClick={() => {
+                    onSidebarToggle && onSidebarToggle()
+                    onCollapsedChange && onCollapsedChange(true)
+                    setCompactSidebar(false)
+                  }}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-zinc-600/70 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60"
+                  aria-label="Close sidebar"
+                  title="Close sidebar"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+                {/* Down arrow toggle - compact 42% height mode */}
+                <button
+                  onClick={() => setCompactSidebar((v) => !v)}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-zinc-600/70 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60"
+                  aria-label={compactSidebar ? 'Expand sidebar to full height' : 'Condense sidebar to 42% height'}
+                  title={compactSidebar ? 'Expand to full' : 'Condense to 42%'}
+                >
+                  {compactSidebar ? (
+                    // Up arrow when compact (to expand)
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                      <path d="M14.77 12.79a.75.75 0 01-1.06-.02L10 8.915l-3.71 3.354a.75.75 0 11-1.04-1.08l4.24-3.833a.75.75 0 011.04 0l4.24 3.833c.3.27.32.74.05 1.04z" />
+                    </svg>
+                  ) : (
+                    // Down arrow when full (to compact)
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                      <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.585l3.71-3.354a.75.75 0 011.04 1.08l-4.24 3.833a.75.75 0 01-1.04 0L5.21 8.29a.75.75 0 01.02-1.08z" />
+                    </svg>
+                  )}
+                </button>
+              </>
+            )}
+            {/* Existing layout toggle (sidebar/dropdown) */}
+            <button
+              onClick={() => onSidebarToggle && onSidebarToggle()}
+              className="inline-flex items-center justify-center w-7 h-7 rounded border border-zinc-600/70 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60"
+              aria-label={sidebar ? 'Switch to dropdown layout' : 'Expand to sidebar layout'}
+              title={sidebar ? 'Switch to dropdown layout' : 'Expand to sidebar layout'}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                <path d="M3 5h14v2H3V5zm0 4h9v2H3V9zm0 4h14v2H3v-2z" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="flex items-center justify-between text-[12px]">
           <span className="inline-flex items-center gap-1">
@@ -491,44 +558,52 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
   // Dropdown panel (compact) - narrower than sidebar
   const DropdownPanel = (
     <div id="galaxy-ui-panel" role="region" aria-label="Clustering Galaxy Controls"
-      className="fixed right-3 top-12 z-40 w-[90vw] max-w-[22rem] max-h-[75vh] overflow-y-auto overflow-x-hidden small-scrollbar rounded-lg border border-zinc-700/60 bg-zinc-900/95 backdrop-blur text-zinc-200 shadow-[0_0_20px_rgba(59,130,246,0.15)] pointer-events-auto">
+      className="fixed z-40 w-[90vw] max-w-[22rem] max-h-[75vh] overflow-y-auto overflow-x-hidden small-scrollbar rounded-lg border border-zinc-700/60 bg-zinc-900/95 backdrop-blur text-zinc-200 shadow-[0_0_20px_rgba(59,130,246,0.15)] pointer-events-auto"
+      style={panelPos ? { top: panelPos.top, right: panelPos.right } : undefined}
+    >
       {renderHeader()}
       <div className="space-y-2 py-2">
         {renderSwarmSection()}
+        {renderBuyQuantityRow()}
         {renderTokenUpgradeSection()}
         {renderIqUpgradeSection()}
         {renderDebugSection()}
       </div>
-        {/* Debug tools (dev only) */}
-        {api.debug?.addCores && (
-          <div className="px-4 py-3">
-            <div className="text-[11px] font-semibold text-zinc-400 mb-2">Debug</div>
+      {/* Debug tools (dev only) */}
+      {api.debug?.addCores && (
+        <div className="px-4 py-3">
+          <div className="text-[11px] font-semibold text-zinc-400 mb-2">Debug</div>
+          <button
+            onClick={() => {
+              const arr: number[] = []
+              for (let r = 0; r < 20; r++) arr.push(1, 2, 3, 4, 5)
+              api.debug!.addCores(arr)
+            }}
+            className="w-full rounded border border-zinc-700/70 bg-zinc-800/60 px-3 py-2 text-[12px] font-semibold text-zinc-200 hover:bg-zinc-700/60 transition"
+          >
+            Spawn 20× cores (L1–L5)
+          </button>
+          {api.setExtremeMode && (
             <button
-              onClick={() => {
-                const arr: number[] = []
-                for (let r = 0; r < 20; r++) arr.push(1, 2, 3, 4, 5)
-                api.debug!.addCores(arr)
-              }}
-              className="w-full rounded border border-zinc-700/70 bg-zinc-800/60 px-3 py-2 text-[12px] font-semibold text-zinc-200 hover:bg-zinc-700/60 transition"
+              onClick={() => api.setExtremeMode && api.setExtremeMode(!api.getExtremeMode?.())}
+              className="mt-2 w-full rounded border border-red-600/60 bg-red-600/20 px-3 py-2 text-[12px] font-semibold text-red-200 hover:bg-red-600/30 transition"
             >
-              Spawn 20× cores (L1–L5)
+              Toggle Extreme Mode
             </button>
-            {api.setExtremeMode && (
-              <button
-                onClick={() => api.setExtremeMode && api.setExtremeMode(!api.getExtremeMode?.())}
-                className="mt-2 w-full rounded border border-red-600/60 bg-red-600/20 px-3 py-2 text-[12px] font-semibold text-red-200 hover:bg-red-600/30 transition"
-              >
-                Toggle Extreme Mode
-              </button>
-            )}
-          </div>
-        )}
+          )}
+        </div>
+      )}
     </div>
   )
 
   // Sidebar (expanded)
   const Sidebar = (
-    <div className="fixed inset-y-0 right-0 z-50 w-[100vw] sm:w-[24rem] border-l border-zinc-700/60 bg-zinc-900/95 backdrop-blur text-zinc-200 shadow-[0_0_28px_rgba(59,130,246,0.25)] overflow-y-auto overflow-x-hidden small-scrollbar pointer-events-auto">
+    <div
+      className={
+        "fixed right-0 z-50 w-[100vw] sm:w-[24rem] border-l border-zinc-700/60 bg-zinc-900/95 backdrop-blur text-zinc-200 shadow-[0_0_28px_rgba(59,130,246,0.25)] overflow-y-auto overflow-x-hidden small-scrollbar pointer-events-auto"
+        + (compactSidebar ? " bottom-0 h-[42vh] rounded-t-lg" : " inset-y-0")
+      }
+    >
       {renderHeader()}
       <div className="space-y-1">
         {renderSwarmSection()}
@@ -755,7 +830,6 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
 
   return (
     <>
-      {trigger}
       {!collapsed && !sidebar && DropdownPanel}
       {sidebar && Sidebar}
       {tooltip.visible && (

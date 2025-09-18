@@ -32,6 +32,15 @@ This is a Next.js 15 portfolio website for Nicholas Dudczyk (dudz.pro) featuring
 - **Pointer Events**: Top overlays (toasts) and header shell use `pointer-events: none`; only interactive controls `pointer-events: auto`. Ensures clicks reach the game canvas.
 - **Hydration**: `suppressHydrationWarning` applied to root `<html>` and gradient title spans to avoid Dark Reader mismatches.
 
+## UI Layout Improvements (2025-01-16)
+
+- **Expand Game Button**: Moved to top row with Email/GitHub buttons for better accessibility
+- **GalaxyUI Button**: Repositioned to left side, same row as Settings button for balanced layout
+- **Settings Dropdown**: Fixed positioning to open to the right when button is on left side
+- **FPS Counter**: Made responsive - positioned below Settings button on small screens
+- **Drag and Drop System**: Fixed data pieces getting stuck in drag mode with comprehensive state management
+- **Drag and Drop Toggle**: Fixed Settings toggle functionality with proper localStorage persistence
+
 ## Files of Interest
 
 - `app/page.tsx`: Mounts starfield + game canvas; houses header controls, toasts, and HUD placement. Applies pointer-events layering.
@@ -149,6 +158,11 @@ Third-party extensions (e.g., Dark Reader) inject attributes causing SSR/CSR mis
 - Auto-starts clicker game on load
 - Project showcase grid with hover animations
 - **Critical State**: `galaxyOn` controls game visibility, `starsOn` controls starfield
+- **UI Layout (2025-01-16)**: 
+  - Top row: Email/GitHub buttons (left) + Expand Game button (right)
+  - Second row: GalaxyUI button (left) + Settings button (right)
+  - FPS Counter: Responsive positioning below Settings on small screens
+  - Settings dropdown: Opens to the right when button is on left side
 - Adds responsive right padding to the top row when the Galaxy HUD sidebar is open to avoid Settings overlap
 
 ## Recent Major Enhancements (2025-01-16)
@@ -368,6 +382,32 @@ Placement: The page positions the FPS counter under the Email button to avoid ov
 ```
 
 ## Common Debugging Issues & Critical Fixes
+
+### Drag and Drop Stuck Bug (FIXED - 2025-01-16)
+**Problem**: Data pieces get stuck in drag mode despite mouse being released, requiring additional clicks to release
+**Root Causes**: 
+- Race conditions between multiple event handlers (pointerup, pointercancel, contextmenu, blur)
+- State inconsistency between canvas component and game hook
+- Pointer capture issues and incomplete cleanup
+- Multiple drag attempts with conflicting state management
+**Solution**: Implemented centralized drag state management with comprehensive cleanup:
+- Single `dragState` object with all drag-related state
+- Centralized `cleanupDragState()` function called from all event handlers
+- Proper pointer capture error handling with try/catch blocks
+- State validation before starting new drags
+- Complete cleanup on component unmount
+**Debug**: Console shows detailed drag state logging with cleanup confirmations
+
+### Drag and Drop Toggle Bug (FIXED - 2025-01-16)
+**Problem**: Drag and drop toggle in Settings UI doesn't function - setting resets on page reload
+**Root Cause**: `dragAndDropEnabled` state not persisted to localStorage
+**Solution**: Added complete persistence system:
+- Added `dragAndDropEnabled` to `Persisted` type
+- Load from `localStorage.getItem("galaxy.dragAndDropEnabled")` on initialization
+- Save to localStorage in `setDragAndDropEnabled()` function
+- Reset to `true` in `clearSaveData()` function
+- Default to `true` for new users
+**Debug**: Setting now persists across page reloads and browser sessions
 
 ### Click Detection Issues (FIXED)
 **Problem**: Clicks fail after page refresh, even though canvas clicks are detected

@@ -312,7 +312,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const palette: string[] = Array.isArray(cos?.coreColors) && cos.coreColors.length >= 5
       ? cos.coreColors
       : ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"]
-    return [...base, ...palette.slice(0,5)]
+    
+    // Use custom data glow color if available, otherwise use default
+    const dataGlowColor = cos?.dataGlowColor || "#00ff88"
+    
+    // Return base colors + core colors + data glow color at index 10
+    return [...base, ...palette.slice(0,5), dataGlowColor]
   }
 
   // --- Special Effects Color Helpers ---
@@ -388,7 +393,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const LEVEL_RATE = GAME_CONFIG.LEVEL_RATE
 
   // Persisted bits
-  type Persisted = { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }; lastSeen: number; totalEverCollected: number }
+  type Persisted = { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }; lastSeen: number; totalEverCollected: number; dragAndDropEnabled: boolean }
   const persisted = useRef<Persisted | null>(null)
   const [uiState, setUiState] = useState<GalaxyState>(() => ({
     tokens: 0,
@@ -782,6 +787,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const upgradesRaw = localStorage.getItem("galaxy.upgrades")
       const iqUpRaw = localStorage.getItem("galaxy.iqUpgrades")
       const lastSeenRaw = localStorage.getItem("galaxy.lastSeen")
+      const dragDropRaw = localStorage.getItem("galaxy.dragAndDropEnabled")
       const tokens = tokensRaw ? (parseInt(tokensRaw, 10) || 0) : 0
       const iq = iqRaw ? (parseInt(iqRaw, 10) || 0) : 0
       const upgrades = sanitizeUpgrades(upgradesRaw ? JSON.parse(upgradesRaw) : {})
@@ -789,8 +795,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const lastSeen = lastSeenRaw ? (parseInt(lastSeenRaw, 10) || Date.now()) : Date.now()
       const tecRaw = localStorage.getItem('galaxy.totalEverCollected')
       const totalEverCollected = tecRaw ? (parseInt(tecRaw, 10) || 0) : 0
-      persisted.current = { tokens, iq, upgrades, iqUpgrades, lastSeen, totalEverCollected }
-      setUiState({ tokens, iq, upgrades, iqUpgrades, dragAndDropEnabled: true })
+      const dragAndDropEnabled = dragDropRaw ? (dragDropRaw === 'true') : true
+      persisted.current = { tokens, iq, upgrades, iqUpgrades, lastSeen, totalEverCollected, dragAndDropEnabled }
+      setUiState({ tokens, iq, upgrades, iqUpgrades, dragAndDropEnabled })
       // Restore cores
       const coreDataRaw = localStorage.getItem('galaxy.coreData')
       if (coreDataRaw) {
@@ -838,7 +845,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 },
         iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
         lastSeen: Date.now(),
-        totalEverCollected: 0
+        totalEverCollected: 0,
+        dragAndDropEnabled: true
       }
       setUiState({
         tokens: 0,
@@ -1095,6 +1103,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         p.dragOffsetY = undefined
         p.wobbleT = undefined
         p.wobbleStrength = undefined
+        // Also reset any capture state that might be stuck
+        p.captureT = undefined
+        p.targetCluster = undefined
       }
       // gentle drift for ambient and outliers (velocities are px/sec)
       if (p.state === "ambient" || p.state === "outlier") {
@@ -1937,7 +1948,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         let renderX = p.x
         let renderY = p.y
         let renderRot = (p.rotation || 0) + (p.rotationOffset || 0)
-        let renderRadius = p.state === 'capturing' ? 2.4 : 2.6
+        let renderRadius = p.state === 'capturing' ? 2.6 * 0.75 : 2.6 // 75% size when capturing
 
         // Apply click animation effects (read-only, animation updated in simulation)
         if (p.clickAnimT && p.clickAnimT > 0) {
@@ -1970,11 +1981,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         rec.y = renderY
         rec.radius = renderRadius
         rec.alpha = Math.max(0.9, p.alpha)
-        rec.color = 4
-          rec.shape = 'icon'
-          rec.variant = p.id & 3
-        // Enhanced glow for draggable outliers
-        rec.glow = (p.state === 'capturing' ? 0.5 : 1) + (p.isDragging ? 0.5 : 0.2)
+        rec.color = p.state === 'capturing' ? 10 : 4 // Custom data glow color for capturing points
+        rec.shape = 'icon'
+        rec.variant = p.id & 3
+        // Enhanced glow for capturing points with vibrant neon green
+        rec.glow = p.state === 'capturing' ? 2.0 : (1 + (p.isDragging ? 0.5 : 0.2))
         renderStats.outliers.rendered++
       }
     }
@@ -2966,6 +2977,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     getExtremeMode() { return extremeMode.current },
     setDragAndDropEnabled(enabled: boolean) {
       setUiState(s => ({ ...s, dragAndDropEnabled: enabled }))
+      // Persist to localStorage
+      try {
+        localStorage.setItem("galaxy.dragAndDropEnabled", enabled.toString())
+      } catch (e) {
+        console.warn("Failed to save drag and drop setting:", e)
+      }
     },
     getDragAndDropEnabled() { return uiState.dragAndDropEnabled },
     setPerformanceMode(v: boolean) {
@@ -2983,6 +3000,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         localStorage.removeItem('galaxy.iqUpgrades')
         localStorage.removeItem('galaxy.coreData')
         localStorage.removeItem('galaxy.totalEverCollected')
+        localStorage.removeItem('galaxy.dragAndDropEnabled')
         // Lock sprites except database; reset cosmetics
         const resetCosmetics = {
           coreColors: ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
@@ -3032,6 +3050,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           persisted.current.upgrades = { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0, dataQuality: 0 }
           persisted.current.iqUpgrades = { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false }
           persisted.current.totalEverCollected = 0
+          persisted.current.dragAndDropEnabled = true
         }
         setUiState(s => ({
           ...s,
@@ -3040,6 +3059,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0, dataQuality: 0 },
           iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
           cosmetics: resetCosmetics,
+          dragAndDropEnabled: true,
         }))
         return true
       } catch (e) {
@@ -3308,8 +3328,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     },
 
     endDrag(velocityX, velocityY) {
-      if (!dragStateRef.current?.isActive) return
+      if (!dragStateRef.current?.isActive) {
+        console.log('🚫 endDrag called but no active drag state - ignoring')
+        return
+      }
 
+      console.log('🏁 endDrag called - clearing drag state')
       const draggedPointIdx = dragStateRef.current.draggedPoint
       if (draggedPointIdx !== undefined) {
         const point = points.current[draggedPointIdx]
@@ -3350,7 +3374,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         }
       }
 
+      // Always clear the drag state reference
       dragStateRef.current = null
+      console.log('✅ Drag state cleared')
     },
 
     // Debug functions for testing

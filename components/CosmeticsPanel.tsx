@@ -15,6 +15,7 @@ export type CosmeticsSettings = {
     shiftSpeed?: number
   }
   unlockedSprites?: string[]
+  dataGlowColor?: string // Custom color for data collection glow
 }
 
 export type CosmeticsPanelProps = {
@@ -60,13 +61,14 @@ const SPRITE_OPTIONS = [
 // Default color palettes
 const DEFAULT_CORE_COLORS = ["#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#c084fc"]
 const DEFAULT_AMBIENT_COLORS = ["#e5e7eb"]
+const DEFAULT_DATA_GLOW_COLOR = "#00ff88"
 
 export default function CosmeticsPanel({ visible, onToggle, settings, onSettingsChange, unlocked }: CosmeticsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>('palette')
   const [activeSlot, setActiveSlot] = useState<number>(0) // 0..4 selection for L1..L5
   // Centralized picker state so it cannot be lost on child remounts
   const [openPicker, setOpenPicker] = useState<null | {
-    group: 'core' | 'ambient'
+    group: 'core' | 'ambient' | 'dataGlow'
     index: number
     label: string
   }>(null)
@@ -385,12 +387,27 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                     </div>
                   </div>
 
+                  <div>
+                    <h3 className="text-[12px] font-semibold text-zinc-300 mb-3">Data Collection Glow</h3>
+                    <div className="flex gap-3">
+                      <ColorSwatch
+                        color={settings.dataGlowColor || "#00ff88"}
+                        label="Glow Color"
+                        onOpen={() => {
+                          setOpenPicker({ group: 'dataGlow', index: 0, label: 'Data Glow Color' })
+                          setPickerTempColor(null)
+                        }}
+                      />
+                    </div>
+                  </div>
+
                   <div className="pt-2">
                     <button
                       onClick={() => onSettingsChange({
                         ...settings,
                         coreColors: [...DEFAULT_CORE_COLORS],
-                        ambientColors: [...DEFAULT_AMBIENT_COLORS]
+                        ambientColors: [...DEFAULT_AMBIENT_COLORS],
+                        dataGlowColor: DEFAULT_DATA_GLOW_COLOR
                       })}
                       className="px-3 py-1 text-[10px] bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 rounded hover:bg-zinc-700/60 transition-colors"
                     >
@@ -621,10 +638,12 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                       const newColors = [...settings.coreColors]
                       newColors[openPicker.index] = c
                       onSettingsChange({ ...settings, coreColors: newColors })
-                    } else {
+                    } else if (openPicker.group === 'ambient') {
                       const newColors = [...settings.ambientColors]
                       newColors[openPicker.index] = c
                       onSettingsChange({ ...settings, ambientColors: newColors.filter(Boolean) })
+                    } else if (openPicker.group === 'dataGlow') {
+                      onSettingsChange({ ...settings, dataGlowColor: c })
                     }
                   }
                   apply(presetColor)
@@ -649,10 +668,12 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                       const newColors = [...settings.coreColors]
                       newColors[openPicker.index] = c
                       onSettingsChange({ ...settings, coreColors: newColors })
-                    } else {
+                    } else if (openPicker.group === 'ambient') {
                       const newColors = [...settings.ambientColors]
                       newColors[openPicker.index] = c
                       onSettingsChange({ ...settings, ambientColors: newColors.filter(Boolean) })
+                    } else if (openPicker.group === 'dataGlow') {
+                      onSettingsChange({ ...settings, dataGlowColor: c })
                     }
                   }
                   apply(rc)
@@ -668,7 +689,7 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
           </div>
           <input
             type="color"
-            value={(pickerTempColor ?? (openPicker.group === 'core' ? (settings.coreColors[openPicker.index] || '#ffffff') : (settings.ambientColors[openPicker.index] || '#e5e7eb')))}
+            value={(pickerTempColor ?? (openPicker.group === 'core' ? (settings.coreColors[openPicker.index] || '#ffffff') : openPicker.group === 'ambient' ? (settings.ambientColors[openPicker.index] || '#e5e7eb') : (settings.dataGlowColor || '#00ff88')))}
             onChange={(e) => {
               const c = e.target.value
               setPickerTempColor(c)
@@ -676,10 +697,12 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
                 const newColors = [...settings.coreColors]
                 newColors[openPicker.index] = c
                 onSettingsChange({ ...settings, coreColors: newColors })
-              } else {
+              } else if (openPicker.group === 'ambient') {
                 const newColors = [...settings.ambientColors]
                 newColors[openPicker.index] = c
                 onSettingsChange({ ...settings, ambientColors: newColors.filter(Boolean) })
+              } else if (openPicker.group === 'dataGlow') {
+                onSettingsChange({ ...settings, dataGlowColor: c })
               }
               addRecentColor(c)
             }}
