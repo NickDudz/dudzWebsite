@@ -22,7 +22,7 @@ You may NOT:
 
 ## Commercial Use
 
-For commercial use, licensing, or partnerships, please contact: [Your contact information]
+For commercial use, licensing, or partnerships, please contact: nick@dudz.pro
 
 ## Inspiration vs. Copying
 
@@ -30,4 +30,4 @@ This project is open for inspiration! Feel free to learn from it and build your 
 
 ---
 
-*Built with ❤️ by Nick Dudz*
+*Built by Nick Dudz*

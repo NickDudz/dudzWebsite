@@ -67,6 +67,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
     let isDragging = false
     let hasMoved = false
     let dragStartCoords = { x: 0, y: 0 }
+    let dragAttempted = false // Prevent multiple drag attempts
 
     const getCanvasCoords = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect()
@@ -83,7 +84,8 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       dragStartCoords = coords
       isDragging = false
       hasMoved = false
-      console.log('Pointer down at:', coords.x, coords.y)
+      dragAttempted = false
+      console.log('🔽 Pointer down at:', coords.x.toFixed(1), coords.y.toFixed(1))
     }
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -91,37 +93,69 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
 
       const coords = getCanvasCoords(e.clientX, e.clientY)
 
-      // Check if we've moved enough to consider this a drag
-      const moveDistance = Math.hypot(coords.x - dragStartCoords.x, coords.y - dragStartCoords.y)
-      if (moveDistance > 10 && !isDragging) { // 10px threshold
-        console.log('Movement detected, trying to start drag...')
-        // Try to start dragging
-        const dragStarted = api.startDrag(dragStartCoords.x, dragStartCoords.y)
-        console.log('Drag start result:', dragStarted)
-        if (dragStarted) {
-          isDragging = true
-          canvas.setPointerCapture(e.pointerId)
-        }
-      }
-
+      // CRITICAL: Check if we're already dragging FIRST
       if (isDragging) {
         hasMoved = true
         api.updateDrag(coords.x, coords.y)
+        return // Don't do anything else if already dragging
+      }
+
+      const moveDistance = Math.hypot(coords.x - dragStartCoords.x, coords.y - dragStartCoords.y)
+
+      // Debug: Only log when we detect movement threshold
+      if (!dragAttempted && moveDistance > 8) {
+        console.log('🎯 Movement detected, attempting drag at distance:', moveDistance.toFixed(1))
+      }
+
+      if (dragAttempted) return
+
+      // Check if we've moved enough to consider this a drag
+      // Only allow drag start within reasonable distance from initial click
+      const MAX_DRAG_START_DISTANCE = 100 // Increased to give more room for dragging
+      if (moveDistance > 15 && moveDistance < MAX_DRAG_START_DISTANCE && !isDragging) {
+        console.log('🎯 Attempting drag at distance:', moveDistance.toFixed(1), '(max:', MAX_DRAG_START_DISTANCE, ')')
+        dragAttempted = true // Prevent further attempts
+        // Try to start dragging from current mouse position (not start position)
+        const dragStarted = api.startDrag(coords.x, coords.y)
+        console.log('🎯 Drag start result:', dragStarted)
+        if (dragStarted) {
+          isDragging = true
+          canvas.setPointerCapture(e.pointerId)
+          console.log('✅ Drag started successfully - isDragging set to true')
+        } else {
+          console.log('❌ Drag failed - no outlier found at (', coords.x.toFixed(1), coords.y.toFixed(1), ')')
+          // Don't reset dragAttempted - prevent further attempts on this gesture
+        }
+      } else if (moveDistance >= MAX_DRAG_START_DISTANCE && !dragAttempted) {
+        // If user moved too far, prevent any drag attempts
+        console.log('🚫 Moved too far for drag start:', moveDistance.toFixed(1), '>=', MAX_DRAG_START_DISTANCE)
+        dragAttempted = true // Prevent further attempts
       }
     }
 
     const handlePointerUp = (e: PointerEvent) => {
       if (!enabled) return
 
+      console.log('👆 Pointer up - isDragging:', isDragging, 'hasMoved:', hasMoved, 'dragAttempted:', dragAttempted)
+
       if (isDragging) {
-        // End drag
+        // End drag - this should happen when user releases after successful drag
+        console.log('🏁 Ending drag (user released after dragging)')
         api.endDrag()
         canvas.releasePointerCapture(e.pointerId)
         isDragging = false
-      } else if (!hasMoved) {
-        // Quick click without significant movement
+        console.log('✅ Drag ended - point should move to nearest core')
+      } else if (!hasMoved && !dragAttempted) {
+        // Quick click - no movement, no drag attempted = regular click
+        console.log('👆 Quick click detected - triggering click')
         api.clickAt(dragStartCoords.x, dragStartCoords.y)
+      } else {
+        // Failed drag attempt or moved too much - don't trigger click
+        console.log('👆 Failed drag or moved too much - ignoring click')
       }
+
+      // Reset state for next interaction
+      dragAttempted = false
     }
 
     const handlePointerCancel = (e: PointerEvent) => {
@@ -131,6 +165,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       }
       isDragging = false
       hasMoved = false
+      dragAttempted = false
     }
 
     // Add pointer events for better cross-device support

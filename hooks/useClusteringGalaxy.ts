@@ -1196,24 +1196,33 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       } else if (p.state === 'capturing' && p.targetCluster != null) {
         // Handle drag state - if being dragged, follow mouse instead of moving to core
         if (p.isDragging && dragStateRef.current) {
+          // dragOffsetX/Y stores: mouse_world - point_world
+          // So: point_world = mouse_world - offset
+          // dragStateRef.current.worldX/Y now store actual world coordinates
+          const oldX = p.x
+          const oldY = p.y
           p.x = dragStateRef.current.worldX - (p.dragOffsetX || 0)
           p.y = dragStateRef.current.worldY - (p.dragOffsetY || 0)
+          console.log('🎯 DRAG UPDATE: Mouse world (', dragStateRef.current.worldX.toFixed(1), dragStateRef.current.worldY.toFixed(1), ') point moved from (', oldX.toFixed(1), oldY.toFixed(1), ') to (', p.x.toFixed(1), p.y.toFixed(1), ')')
         } else {
           // Normal capture animation toward core
-          const c = clusters.current[p.targetCluster]
-          const dx = c.x - p.x
-          const dy = c.y - p.y
-          const dist = Math.hypot(dx, dy)
+        const c = clusters.current[p.targetCluster]
+        const dx = c.x - p.x
+        const dy = c.y - p.y
+        const dist = Math.hypot(dx, dy)
           // Smooth speed based on distance - faster when far, slower when close
           const speedFactor = Math.min(1, dist / 50) // Max speed when far, slow down when close
           const spd = 200 + (dist * 2) // Base speed + distance-based acceleration
-          const nx = dx / (dist || 1)
-          const ny = dy / (dist || 1)
+        const nx = dx / (dist || 1)
+        const ny = dy / (dist || 1)
           p.x += nx * spd * speedFactor * dt
           p.y += ny * spd * speedFactor * dt
         }
 
-        p.captureT = (p.captureT || 0.4) - dt
+        // Only count down capture timer if not being dragged
+        if (!p.isDragging) {
+          p.captureT = (p.captureT || 0.4) - dt
+        }
         if (p.captureT <= 0 || (!p.isDragging && p.targetCluster != null && Math.hypot(clusters.current[p.targetCluster].x - p.x, clusters.current[p.targetCluster].y - p.y) < 8)) {
           p.state = 'clustered'
           p.clusterId = p.targetCluster
@@ -1762,9 +1771,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         renderStats.outliers.total++
         if (n >= drawBuffer.length - reservedForCores - 5) break
 
-          const rec = drawBuffer[n++]
-          rec.x = p.x
-          rec.y = p.y
+        const rec = drawBuffer[n++]
+        rec.x = p.x
+        rec.y = p.y
         // Apply click animation effects
         let renderX = p.x
         let renderY = p.y
@@ -1785,6 +1794,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         // Apply drag visual effects
         if (p.isDragging) {
           renderRadius *= 1.1 // Slightly larger when dragging
+          console.log('🎯 RENDERING dragged point at:', renderX.toFixed(1), renderY.toFixed(1), 'world coords, radius:', renderRadius.toFixed(1))
         }
 
         rec.x = renderX
@@ -1792,9 +1802,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         rec.radius = renderRadius
         rec.alpha = Math.max(0.9, p.alpha)
         rec.color = 4
-        rec.shape = 'icon'
-        rec.variant = p.id & 3
-        rec.glow = (p.state === 'capturing' ? 0.5 : 1) + (p.isDragging ? 0.3 : 0)
+          rec.shape = 'icon'
+          rec.variant = p.id & 3
+        // Enhanced glow for draggable outliers
+        rec.glow = (p.state === 'capturing' ? 0.5 : 1) + (p.isDragging ? 0.5 : 0.2)
         renderStats.outliers.rendered++
       }
     }
@@ -3063,36 +3074,39 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     startDrag(x, y) {
       if (!enabledRef.current) return false
 
-      // Convert screen coordinates to world coordinates
-      const worldCoords = screenToWorld(x, y)
-      const worldX = worldCoords.x
-      const worldY = worldCoords.y
+      // Use screen coordinates directly (same as click function)
+      // Don't convert to world coordinates - nearestOutlierWithin expects screen coords
+      const screenX = x
+      const screenY = y
 
-      console.log('startDrag called at:', x, y, 'world:', worldX, worldY)
-
-      // Find the nearest outlier within click radius
-      const idx = nearestOutlierWithin(worldX, worldY, CLICK_RADIUS)
-      console.log('nearestOutlierWithin returned:', idx, 'CLICK_RADIUS:', CLICK_RADIUS)
+      // Find the nearest outlier within click radius (use larger radius for dragging)
+      const dragRadius = CLICK_RADIUS * 1.5 // 72 pixels for dragging
+      const idx = nearestOutlierWithin(screenX, screenY, dragRadius)
 
       if (idx !== -1) {
         const p = points.current[idx]
-        console.log('Found point at index', idx, 'state:', p.state, 'position:', p.x, p.y)
         if (p.state === 'outlier') {
-          console.log('Starting drag for point', idx)
-          // Start dragging this point
-          p.isDragging = true
-          p.dragOffsetX = p.x - worldX
-          p.dragOffsetY = p.y - worldY
+          // Calculate offset BEFORE calling convertOutlier
+          const mouseWorldCoords = screenToWorld(screenX, screenY)
+          const dragOffsetX = mouseWorldCoords.x - p.x
+          const dragOffsetY = mouseWorldCoords.y - p.y
+          console.log('🎯 DRAG START: Point at world (', p.x.toFixed(1), p.y.toFixed(1), ') mouse at world (', mouseWorldCoords.x.toFixed(1), mouseWorldCoords.y.toFixed(1), ') offset (', dragOffsetX.toFixed(1), dragOffsetY.toFixed(1), ')')
 
           dragStateRef.current = {
-            worldX,
-            worldY,
+            worldX: mouseWorldCoords.x,  // Store world coordinates
+            worldY: mouseWorldCoords.y,
             isActive: true,
             draggedPoint: idx
           }
 
           // Convert to capturing state but don't trigger click animation
           convertOutlier(idx, true) // true = skip animation
+
+          // NOW set drag properties AFTER convertOutlier (which clears them)
+          p.isDragging = true
+          p.dragOffsetX = dragOffsetX
+          p.dragOffsetY = dragOffsetY
+
           return true
         }
       }
@@ -3102,21 +3116,41 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     updateDrag(x, y) {
       if (!enabledRef.current || !dragStateRef.current?.isActive) return
 
-      // Convert screen coordinates to world coordinates
+      // Convert screen coordinates to world coordinates and store them
       const worldCoords = screenToWorld(x, y)
-
-      // Update drag state
       dragStateRef.current.worldX = worldCoords.x
       dragStateRef.current.worldY = worldCoords.y
+
+      console.log('🖱️ Mouse at screen coords:', x.toFixed(1), y.toFixed(1), '-> world:', worldCoords.x.toFixed(1), worldCoords.y.toFixed(1))
     },
 
     endDrag() {
       if (!dragStateRef.current?.isActive) return
 
-      dragStateRef.current.isActive = false
+      const draggedPointIdx = dragStateRef.current.draggedPoint
+      if (draggedPointIdx !== undefined) {
+        const point = points.current[draggedPointIdx]
+        if (point && point.isDragging) {
+          // Set final position using stored world coordinates (no double conversion needed)
+          point.x = dragStateRef.current.worldX - (point.dragOffsetX || 0)
+          point.y = dragStateRef.current.worldY - (point.dragOffsetY || 0)
 
-      // If we were dragging a point, it will continue toward its target core
-      // The capturing animation will handle the rest
+          // Find the nearest core to the dropped position
+          const nearestCoreIdx = nearestCluster(point.x, point.y)
+          point.targetCluster = nearestCoreIdx
+
+          // IMMEDIATE CAPTURE: Set captureT = 0 for instant capture like a click
+          point.captureT = 0
+
+          console.log('🎯 Drag ended - point dropped at (', point.x.toFixed(1), point.y.toFixed(1), ') targeting core', nearestCoreIdx, '- IMMEDIATE CAPTURE')
+
+          // Clear drag state for this point
+          point.isDragging = false
+          point.dragOffsetX = undefined
+          point.dragOffsetY = undefined
+        }
+      }
+
       dragStateRef.current = null
     },
 
