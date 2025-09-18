@@ -3074,6 +3074,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     startDrag(x, y) {
       if (!enabledRef.current) return false
 
+      // Prevent starting a new drag if one is already active
+      if (dragStateRef.current?.isActive) {
+        console.log('🚫 Drag already active - ignoring new drag attempt')
+        return false
+      }
+
       // Use screen coordinates directly (same as click function)
       // Don't convert to world coordinates - nearestOutlierWithin expects screen coords
       const screenX = x

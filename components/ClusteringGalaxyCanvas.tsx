@@ -80,6 +80,12 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
     const handlePointerDown = (e: PointerEvent) => {
       if (!enabled) return
 
+      // Prevent starting new interactions if drag is already active
+      if (isDragging) {
+        console.log('🚫 Drag already active - ignoring pointer down')
+        return
+      }
+
       const coords = getCanvasCoords(e.clientX, e.clientY)
       dragStartCoords = coords
       isDragging = false
@@ -159,10 +165,49 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
     }
 
     const handlePointerCancel = (e: PointerEvent) => {
+      console.log('🚫 Pointer cancelled - cleaning up drag state')
       if (isDragging) {
+        console.log('🏁 Force ending drag due to pointer cancel')
         api.endDrag()
         canvas.releasePointerCapture(e.pointerId)
+        isDragging = false
+      } else if (dragAttempted) {
+        console.log('🚫 Cancelling drag attempt')
+        // If we were attempting a drag but pointer was cancelled, reset state
+        dragAttempted = false
       }
+      // Always reset state on cancel
+      isDragging = false
+      hasMoved = false
+      dragAttempted = false
+    }
+
+    const handleContextMenu = (e: MouseEvent) => {
+      // Prevent right-click context menu during drag operations
+      e.preventDefault()
+      console.log('🚫 Right-click detected - cancelling any active drag')
+      if (isDragging) {
+        console.log('🏁 Force ending drag due to right-click')
+        api.endDrag()
+        canvas.releasePointerCapture(1) // Release any captures
+        isDragging = false
+      }
+      // Always reset state on right-click
+      isDragging = false
+      hasMoved = false
+      dragAttempted = false
+    }
+
+    const handleWindowBlur = () => {
+      // Handle window blur (alt-tab, clicking outside browser, etc.)
+      console.log('🚫 Window blur detected - cancelling any active drag')
+      if (isDragging) {
+        console.log('🏁 Force ending drag due to window blur')
+        api.endDrag()
+        // Note: Can't release pointer capture on blur as pointer might not exist
+        isDragging = false
+      }
+      // Reset all drag state on window blur
       isDragging = false
       hasMoved = false
       dragAttempted = false
@@ -173,12 +218,18 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
     canvas.addEventListener("pointermove", handlePointerMove)
     canvas.addEventListener("pointerup", handlePointerUp)
     canvas.addEventListener("pointercancel", handlePointerCancel)
+    canvas.addEventListener("contextmenu", handleContextMenu)
+
+    // Add window events for drag cleanup
+    window.addEventListener("blur", handleWindowBlur)
 
     return () => {
       canvas.removeEventListener("pointerdown", handlePointerDown)
       canvas.removeEventListener("pointermove", handlePointerMove)
       canvas.removeEventListener("pointerup", handlePointerUp)
       canvas.removeEventListener("pointercancel", handlePointerCancel)
+      canvas.removeEventListener("contextmenu", handleContextMenu)
+      window.removeEventListener("blur", handleWindowBlur)
     }
   }, [enabled, api])
 
