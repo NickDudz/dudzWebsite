@@ -33,6 +33,22 @@ This is a Next.js 15 portfolio website for Nicholas Dudczyk (dudz.pro) featuring
 - **Hydration**: `suppressHydrationWarning` applied to root `<html>` and gradient title spans to avoid Dark Reader mismatches.
 
 ## UI Layout Improvements (2025-01-16)
+## Data Types Tiering (2025-09-18)
+
+- New Data Types (IQ) system replaces older Confetti/Palette unlock UI in `components/GalaxyUI.tsx`.
+- Tiers: Bronze (default), Silver, Gold, Rare, Epic.
+- Unlock costs: 1 IQ each via `api.purchaseIQ('silverUnlock'|'goldUnlock'|'rareUnlock'|'epicUnlock')`.
+- Chance upgrades: +25% per level, 1 IQ each via `api.purchaseIQ('<tier>ChanceUp')`. Effective chance clamps to 100%: `base * (1 + 0.25 * level)`.
+- Base per-wave spawn chances (every 5s on independent timers): Silver 75%, Gold 40%, Rare 10%, Epic 1%.
+- Bronze spawns remain controlled by token upgrades: `spawnRate` and `spawnQty`.
+- Timers are staggered on first init: Silver t=1s, Gold t=2s, Rare t=3s, Epic t=4s; then 5s cadence.
+- Engine types updated in `hooks/useClusteringGalaxy.ts`: `Point.tier` and `GalaxyState.iqUpgrades` now include unlock flags and per-tier `ChanceLvl` values. Persistence migration handled by sanitizer.
+- Rendering: Outliers carry `tier` and should reflect tier glow; capture visuals already tier-aware. Idle glows subtly indicate tier color according to `TIER_COLORS`.
+
+Troubleshooting:
+- If UI buttons do nothing, verify `api.purchaseIQ` includes new keys and that `useClusteringGalaxy` is wired where HUD is mounted.
+- If unlocks/levels don't persist, check `localStorage.galaxy.iqUpgrades` and sanitizer additions.
+
 
 - **Expand Game Button**: Moved to top row with Email/GitHub buttons for better accessibility
 - **GalaxyUI Button**: Repositioned to left side, same row as Settings button for balanced layout

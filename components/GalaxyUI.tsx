@@ -7,8 +7,8 @@ import type { Upgrades } from "../hooks/useClusteringGalaxy"
 const { upgradeCost } = require("../hooks/galaxyMath.js") as { upgradeCost: (k: keyof Upgrades, level: number) => number }
 
 export type GalaxyUIProps = {
-  state: { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades?: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }; cosmetics?: { coreColors?: string[] } }
-  api: { purchase: (k: keyof Upgrades, qty?: number) => void; purchaseIQ?: (k: 'computeMult' | 'autoCollect' | 'confetti' | 'palette') => void; triggerEffect: (name: "confetti" | "palette") => void; getStats?: () => { tokensPerSec: number; coresByLevel: number[]; totalEverCollected: number; currentFloatingData: number }; getExtremeMode?: () => boolean; setExtremeMode?: (v: boolean) => void; debug?: { addTokens: (amount: number) => void; addIQ: (amount: number) => void; addCores: (levels: number[]) => void; setUpgradeLevel: (upgradeKey: keyof Upgrades, level: number) => void; setIQUpgradeLevel: (upgradeKey: 'computeMult' | 'autoCollect' | 'confettiUnlocked' | 'paletteUnlocked', level: number) => void; setExtremeMode?: (v: boolean) => void } }
+  state: { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades?: { computeMult: number; autoCollect: number; confettiUnlocked?: boolean; paletteUnlocked?: boolean; silverUnlocked?: boolean; goldUnlocked?: boolean; rareUnlocked?: boolean; epicUnlocked?: boolean; silverChanceLvl?: number; goldChanceLvl?: number; rareChanceLvl?: number; epicChanceLvl?: number }; cosmetics?: { coreColors?: string[] } }
+  api: { purchase: (k: keyof Upgrades, qty?: number) => void; purchaseIQ?: (k: 'computeMult' | 'autoCollect' | 'silverUnlock' | 'goldUnlock' | 'rareUnlock' | 'epicUnlock' | 'silverChanceUp' | 'goldChanceUp' | 'rareChanceUp' | 'epicChanceUp') => void; triggerEffect: (name: "confetti" | "palette") => void; getStats?: () => { tokensPerSec: number; coresByLevel: number[]; totalEverCollected: number; currentFloatingData: number }; getExtremeMode?: () => boolean; setExtremeMode?: (v: boolean) => void; debug?: { addTokens: (amount: number) => void; addIQ: (amount: number) => void; addCores: (levels: number[]) => void; setUpgradeLevel: (upgradeKey: keyof Upgrades, level: number) => void; setIQUpgradeLevel: (upgradeKey: 'computeMult' | 'autoCollect' | 'confettiUnlocked' | 'paletteUnlocked', level: number) => void; setExtremeMode?: (v: boolean) => void } }
   onToggle: () => void
   enabled?: boolean
   collapsed?: boolean
@@ -67,7 +67,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
     { key: "clickYield", label: "Label Quality", desc: "+1 click tokens / level" },
     { key: "batchCollect", label: "Mini-Batch", desc: "+10% chance/level; collect all" },
   ] as { key: keyof Upgrades; label: string; desc: string }[]), [])
-  const iqUp = state.iqUpgrades || { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false }
+  const iqUp = state.iqUpgrades || { computeMult: 0, autoCollect: 0, silverUnlocked: false, goldUnlocked: false, rareUnlocked: false, epicUnlocked: false, silverChanceLvl: 0, goldChanceLvl: 0, rareChanceLvl: 0, epicChanceLvl: 0 }
   const stats = api.getStats ? api.getStats() : { tokensPerSec: 0, coresByLevel: [0,0,0,0,0], totalEverCollected: 0, currentFloatingData: 0 }
   const totalCores = stats.coresByLevel.reduce((a, b) => a + b, 0)
 
@@ -131,7 +131,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
           <div className="mt-1">
             <div className="text-[10px] text-zinc-500 mb-1">Upgrades</div>
             <div className="grid grid-cols-6 sm:grid-cols-8 gap-1.5">
-              {rows.map((r) => {
+            {rows.map((r) => {
                 const lvl = state.upgrades[r.key] ?? 0
                 return (
                   <div
@@ -154,26 +154,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
                   </div>
                 )
               })}
-              <div
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded border border-emerald-500/40 bg-zinc-900/60 flex items-center justify-center text-[12px] font-semibold text-emerald-200"
-                onMouseEnter={(e) => {
-                  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-                  setTooltip({ text: 'Confetti', x: rect.left + rect.width / 2, y: rect.top + rect.height + 8, visible: true })
-                }}
-                onMouseLeave={() => setTooltip(t => ({ ...t, visible: false }))}
-              >
-                {iqUp.confettiUnlocked ? '✓' : ''}
-              </div>
-              <div
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded border border-emerald-500/40 bg-zinc-900/60 flex items-center justify-center text-[12px] font-semibold text-emerald-200"
-                onMouseEnter={(e) => {
-                  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-                  setTooltip({ text: 'Palette', x: rect.left + rect.width / 2, y: rect.top + rect.height + 8, visible: true })
-                }}
-                onMouseLeave={() => setTooltip(t => ({ ...t, visible: false }))}
-              >
-                {iqUp.paletteUnlocked ? '✓' : ''}
-              </div>
+              {/* Confetti/Palette badges removed */}
             </div>
           </div>
         </div>
@@ -252,56 +233,33 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
         onClick={() => setOpenSections((s) => ({ ...s, iq: !s.iq }))}
         className="w-full flex items-center justify-between text-[12px] font-semibold text-zinc-400"
       >
-        <span className="inline-flex items-center"><span className="w-2 h-2 bg-emerald-500 rounded-full mr-2"></span>IQ Upgrades</span>
+        <span className="inline-flex items-center"><span className="w-2 h-2 bg-emerald-500 rounded-full mr-2"></span>Data Types (IQ)</span>
         <span className="text-zinc-500">{openSections.iq ? '▾' : '▸'}</span>
       </button>
       {openSections.iq && (
         <div className="space-y-3 mt-2">
-          {(() => {
-            const lvl = (state.upgrades as any).dataQuality ?? 0
-            return (
-              <>
-                <div className="space-y-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-semibold text-zinc-200">Silver Tier <span className="text-[12px] text-zinc-400">(2 data/click)</span></div>
-                      <div className="text-[12px] text-zinc-400 mt-0.5">Costs 10 IQ; requires Bronze</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => api.purchase && api.purchase('dataQuality' as any)}
-                    disabled={lvl >= 1}
-                    className={`w-full rounded-lg px-4 py-3 text-[14px] font-semibold transition-all ${
-                      lvl >= 1
-                        ? 'border border-zinc-700/70 bg-zinc-800/60 text-zinc-400 cursor-not-allowed'
-                        : 'border border-emerald-500/70 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 shadow-sm hover:shadow-emerald-500/20'
-                    }`}
-                  >
-                    {lvl >= 1 ? 'Unlocked ✓' : 'Buy (10 IQ)'}
-                  </button>
+          {/* Per-tier unlocks and chance upgrades */}
+          {([ 
+            { key: 'silver', label: 'Silver', color: '#c0c0c0', unlockKey: 'silverUnlock', chanceKey: 'silverChanceUp', unlocked: !!iqUp.silverUnlocked, lvl: iqUp.silverChanceLvl || 0, base: 0.75 },
+            { key: 'gold', label: 'Gold', color: '#ffd700', unlockKey: 'goldUnlock', chanceKey: 'goldChanceUp', unlocked: !!iqUp.goldUnlocked, lvl: iqUp.goldChanceLvl || 0, base: 0.40 },
+            { key: 'rare', label: 'Rare', color: '#60a5fa', unlockKey: 'rareUnlock', chanceKey: 'rareChanceUp', unlocked: !!iqUp.rareUnlocked, lvl: iqUp.rareChanceLvl || 0, base: 0.10 },
+            { key: 'epic', label: 'Epic', color: '#a855f7', unlockKey: 'epicUnlock', chanceKey: 'epicChanceUp', unlocked: !!iqUp.epicUnlocked, lvl: iqUp.epicChanceLvl || 0, base: 0.01 },
+          ] as const).map(row => (
+            <div key={row.key} className="space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] font-semibold" style={{ color: row.color }}>{row.label} <span className="text-[12px] text-zinc-400">Lv {row.lvl}</span></div>
+                  <div className="text-[12px] text-zinc-400 mt-0.5">Per 5s roll. Base {Math.round(Math.min(1, row.base) * 100)}%, +25% per level. Effective {(Math.min(1, row.base * (1 + 0.25 * row.lvl)) * 100).toFixed(0)}%.</div>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-semibold text-zinc-200">Gold Tier <span className="text-[12px] text-zinc-400">(3 data/click)</span></div>
-                      <div className="text-[12px] text-zinc-400 mt-0.5">Costs 100 IQ; requires Silver</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => api.purchase && api.purchase('dataQuality' as any)}
-                    disabled={lvl < 1 || lvl >= 2}
-                    className={`w-full rounded-lg px-4 py-3 text-[14px] font-semibold transition-all ${
-                      (lvl < 1 || lvl >= 2)
-                        ? 'border border-zinc-700/70 bg-zinc-800/60 text-zinc-400 cursor-not-allowed'
-                        : 'border border-emerald-500/70 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 shadow-sm hover:shadow-emerald-500/20'
-                    }`}
-                  >
-                    {lvl >= 2 ? 'Unlocked ✓' : 'Buy (100 IQ)'}
-                  </button>
-                </div>
-              </>
-            )
-          })()}
+              </div>
+              <button
+                onClick={() => api.purchaseIQ && api.purchaseIQ(row.unlocked ? row.chanceKey : row.unlockKey)}
+                className={`w-full rounded-lg px-4 py-3 text-[14px] font-semibold transition-all ${row.unlocked ? 'border border-blue-500/70 bg-blue-500/15 hover:bg-blue-500/25 text-blue-200 shadow-sm hover:shadow-blue-500/20' : 'border border-emerald-500/70 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 shadow-sm hover:shadow-emerald-500/20'}`}
+              >
+                {row.unlocked ? '+25% Chance (1 IQ)' : 'Unlock (1 IQ)'}
+              </button>
+            </div>
+          ))}
           <div className="space-y-2">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
@@ -330,38 +288,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
               Buy ({Math.pow(2, iqUp.autoCollect)} IQ)
             </button>
           </div>
-          <div className="space-y-2">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-[14px] font-semibold text-zinc-200">Cosmetics</div>
-                <div className="text-[12px] text-zinc-400 mt-0.5">Unlock Confetti / Palette (1 IQ each)</div>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => api.purchaseIQ && api.purchaseIQ('confetti')}
-                disabled={iqUp.confettiUnlocked}
-                className={`flex-1 rounded-lg px-4 py-3 text-[14px] font-semibold transition-all ${
-                  iqUp.confettiUnlocked
-                    ? 'border border-zinc-700/70 bg-zinc-800/60 text-zinc-400 cursor-not-allowed'
-                    : 'border border-emerald-500/70 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 shadow-sm hover:shadow-emerald-500/20'
-                }`}
-              >
-                {iqUp.confettiUnlocked ? 'Confetti ✓' : 'Confetti (1 IQ)'}
-              </button>
-              <button
-                onClick={() => api.purchaseIQ && api.purchaseIQ('palette')}
-                disabled={iqUp.paletteUnlocked}
-                className={`flex-1 rounded-lg px-4 py-3 text-[14px] font-semibold transition-all ${
-                  iqUp.paletteUnlocked
-                    ? 'border border-zinc-700/70 bg-zinc-800/60 text-zinc-400 cursor-not-allowed'
-                    : 'border border-emerald-500/70 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 shadow-sm hover:shadow-emerald-500/20'
-                }`}
-              >
-                {iqUp.paletteUnlocked ? 'Palette ✓' : 'Palette (1 IQ)'}
-              </button>
-            </div>
-          </div>
+          {/* Cosmetics unlocks removed; cosmetics available by default in Cosmetics panel */}
         </div>
       )}
     </div>
@@ -760,30 +687,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
                 <div className="text-[12px] text-zinc-400 mt-1">Unlock Confetti / Palette (1 IQ each)</div>
               </div>
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => api.purchaseIQ && api.purchaseIQ('confetti')}
-                disabled={iqUp.confettiUnlocked}
-                className={`flex-1 rounded-lg px-4 py-3 text-[15px] font-semibold transition-all ${
-                  iqUp.confettiUnlocked
-                    ? 'border border-zinc-700/70 bg-zinc-800/60 text-zinc-400 cursor-not-allowed'
-                    : 'border border-emerald-500/70 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 shadow-sm hover:shadow-emerald-500/20'
-                }`}
-              >
-                {iqUp.confettiUnlocked ? 'Confetti ✓' : 'Confetti (1 IQ)'}
-              </button>
-              <button
-                onClick={() => api.purchaseIQ && api.purchaseIQ('palette')}
-                disabled={iqUp.paletteUnlocked}
-                className={`flex-1 rounded-lg px-4 py-3 text-[15px] font-semibold transition-all ${
-                  iqUp.paletteUnlocked
-                    ? 'border border-zinc-700/70 bg-zinc-800/60 text-zinc-400 cursor-not-allowed'
-                    : 'border border-emerald-500/70 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 shadow-sm hover:shadow-emerald-500/20'
-                }`}
-              >
-                {iqUp.paletteUnlocked ? 'Palette ✓' : 'Palette (1 IQ)'}
-              </button>
-            </div>
+            {/* removed cosmetics buttons */}
           </div>
 
           {/* Debug Buttons */}

@@ -34,6 +34,7 @@ export type Point = {
   clusterId?: number
   age: number
   alpha: number
+  tier?: 1 | 2 | 3 | 4 | 5
   orbitR?: number
   orbitPhase?: number
   targetCluster?: number
@@ -87,7 +88,7 @@ export type GalaxyState = {
   tokens: number
   iq: number
   upgrades: Upgrades
-  iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }
+  iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean; silverUnlocked: boolean; goldUnlocked: boolean; rareUnlocked: boolean; epicUnlocked: boolean; silverChanceLvl?: number; goldChanceLvl?: number; rareChanceLvl?: number; epicChanceLvl?: number }
   dragAndDropEnabled: boolean
 }
 
@@ -96,7 +97,7 @@ export type GalaxyAPI = {
   registerCanvas: (canvas: HTMLCanvasElement | null) => () => void
   clickAt: (x: number, y: number) => void
   purchase: (key: keyof Upgrades) => void
-  purchaseIQ: (key: 'computeMult' | 'autoCollect' | 'confetti' | 'palette') => void
+  purchaseIQ: (key: 'computeMult' | 'autoCollect' | 'silverUnlock' | 'goldUnlock' | 'rareUnlock' | 'epicUnlock' | 'silverChanceUp' | 'goldChanceUp' | 'rareChanceUp' | 'epicChanceUp' | 'confetti' | 'palette') => void
   triggerEffect: (name: "confetti" | "palette") => void
   getStats: () => { tokensPerSec: number; coresByLevel: number[]; totalEverCollected: number; currentFloatingData: number }
   getCosmeticsSettings?: () => { coreColors: string[]; ambientColors: string[]; coreSprites: string[]; unlockedSprites: string[]; specialEffects?: { rgbNeon?: boolean; customShift?: boolean; shiftSpeed?: number } }
@@ -175,6 +176,13 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     unlockables: { rendered: 0, total: 0, limit: 0 },
     buffer: { used: 0, total: 0, available: 0 }
   })
+
+  // Tiered spawn timers (seconds). Bronze remains on legacy spawnCooldown.
+  const silverTimer = useRef<number>(5)
+  const goldTimer = useRef<number>(5)
+  const rareTimer = useRef<number>(5)
+  const epicTimer = useRef<number>(5)
+  const tierTimersInitialized = useRef<boolean>(false)
 
   // Two-canvas clustered data system
   type ClusteredCanvas = {
@@ -393,13 +401,13 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   const LEVEL_RATE = GAME_CONFIG.LEVEL_RATE
 
   // Persisted bits
-  type Persisted = { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }; lastSeen: number; totalEverCollected: number; dragAndDropEnabled: boolean }
+type Persisted = { tokens: number; iq: number; upgrades: Upgrades; iqUpgrades: GalaxyState['iqUpgrades']; lastSeen: number; totalEverCollected: number; dragAndDropEnabled: boolean }
   const persisted = useRef<Persisted | null>(null)
   const [uiState, setUiState] = useState<GalaxyState>(() => ({
     tokens: 0,
     iq: 0,
     upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 },
-    iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
+    iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false, silverUnlocked: false, goldUnlocked: false, rareUnlocked: false, epicUnlocked: false, silverChanceLvl: 0, goldChanceLvl: 0, rareChanceLvl: 0, epicChanceLvl: 0 },
     dragAndDropEnabled: true, // Default enabled
   }))
   const [targetFpsState, setTargetFpsState] = useState(30)
@@ -537,6 +545,14 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       autoCollect: toSafeInt(raw?.autoCollect, 0),
       confettiUnlocked: Boolean(raw?.confettiUnlocked),
       paletteUnlocked: Boolean(raw?.paletteUnlocked),
+      silverUnlocked: Boolean(raw?.silverUnlocked),
+      goldUnlocked: Boolean(raw?.goldUnlocked),
+      rareUnlocked: Boolean(raw?.rareUnlocked),
+      epicUnlocked: Boolean(raw?.epicUnlocked),
+      silverChanceLvl: toSafeInt(raw?.silverChanceLvl, 0),
+      goldChanceLvl: toSafeInt(raw?.goldChanceLvl, 0),
+      rareChanceLvl: toSafeInt(raw?.rareChanceLvl, 0),
+      epicChanceLvl: toSafeInt(raw?.epicChanceLvl, 0),
     }
   }
 
@@ -843,7 +859,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         tokens: 0,
         iq: 0,
         upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 },
-        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
+        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false, silverUnlocked: false, goldUnlocked: false, rareUnlocked: false, epicUnlocked: false, silverChanceLvl: 0, goldChanceLvl: 0, rareChanceLvl: 0, epicChanceLvl: 0 },
         lastSeen: Date.now(),
         totalEverCollected: 0,
         dragAndDropEnabled: true
@@ -852,7 +868,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         tokens: 0,
         iq: 0,
         upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 },
-        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
+        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false, silverUnlocked: false, goldUnlocked: false, rareUnlocked: false, epicUnlocked: false, silverChanceLvl: 0, goldChanceLvl: 0, rareChanceLvl: 0, epicChanceLvl: 0 },
         dragAndDropEnabled: true
       })
     }
@@ -1175,6 +1191,45 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           }
         }
       }
+      // Animated homing path for capturing shards (slower with visible divergence)
+      if (p.state === 'capturing' && p.targetCluster != null) {
+        const c = clusters.current[p.targetCluster]
+        if (c) {
+          // Allow brief outward drift before homing if velocity cooldown active
+          if (p.velocityCooldownT && p.velocityCooldownT > 0) {
+            p.velocityCooldownT = Math.max(0, p.velocityCooldownT - dt)
+            if (p.initialVx || p.initialVy) {
+              p.x += (p.initialVx || 0) * dt
+              p.y += (p.initialVy || 0) * dt
+              // light damping
+              p.initialVx = (p.initialVx || 0) * 0.985
+              p.initialVy = (p.initialVy || 0) * 0.985
+            }
+          } else {
+            const dx = c.x - p.x
+            const dy = c.y - p.y
+            const dist = Math.hypot(dx, dy) || 1
+            const ux = dx / dist
+            const uy = dy / dist
+            // even slower suction speed for clearer visuals
+            const speed = 80
+            // stronger curved path and lateral oscillation (more divergence)
+            const curveBase = ((p.id % 2 === 0) ? 1 : -1) * 0.5
+            const curve = (p.tier && p.tier >= 5) ? curveBase * 1.3 : curveBase
+            const ax = ux * Math.cos(curve) - uy * Math.sin(curve)
+            const ay = ux * Math.sin(curve) + uy * Math.cos(curve)
+            // perpendicular vector for side sway
+            const px = -ay
+            const py = ax
+            const wobbleRate = 1.8 + ((p.id % 3) * 0.6)
+            p.wobbleT = (p.wobbleT || 0) + dt * wobbleRate
+            const swayAmp = (p.tier && p.tier >= 4) ? 140 : 110
+            const sway = Math.sin(p.wobbleT) * swayAmp // pixels of lateral sway
+            p.x += ax * speed * dt + px * sway * dt
+            p.y += ay * speed * dt + py * sway * dt
+          }
+        }
+      }
       if (p.state === "ambient" || p.state === "clustered") {
         // clustered moves with rigid orbit around moving core
         if (p.state === "clustered" && p.clusterId != null) {
@@ -1492,49 +1547,45 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       }
     }
 
-    // Outlier spawn: rate + quantity
-    const currentOutliers = points.current.reduce((n, p) => n + (p.state === "outlier" ? 1 : 0), 0)
+    // Initialize tier timers once (staggered 0..4s)
+    if (!tierTimersInitialized.current) {
+      silverTimer.current = 1
+      goldTimer.current = 2
+      rareTimer.current = 3
+      epicTimer.current = 4
+      tierTimersInitialized.current = true
+    }
+
+    // Outlier spawn: Bronze baseline with spawnRate and spawnQty
+    const currentOutliers = points.current.reduce((n, p) => n + (p.state === 'outlier' ? 1 : 0), 0)
     spawnCooldown.current -= dt
     if (spawnCooldown.current <= 0) {
-      // Use persisted upgrades for consistent values
       const upgrades = persisted.current?.upgrades || { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }
       const spawnRateBoost = 1 + (upgrades.spawnRate || 0) * 0.2
       const baseInterval = Math.max(2.5, BASE_SPAWN / spawnRateBoost)
       const qty = Math.min(5, 1 + (upgrades.spawnQty || 0))
       const toSpawn = Math.min(qty, Math.max(0, 10 - currentOutliers))
-      for (let s = 0; s < toSpawn; s++) {
-        let p: any = null
-        const idx = findAmbientIndex()
-        if (idx !== -1) {
-          p = points.current[idx]
-          } else {
-          // Fallback: create a new point to ensure outliers always spawn
-          const newId = points.current.length
-          p = {
-            id: newId,
-            x: 0, y: 0, vx: 0, vy: 0,
-            alpha: 1,
-            state: 'outlier' as const,
-            age: 0,
-            rotationOffset: Math.random() * Math.PI * 2,
-            clusterId: undefined,
-            targetCluster: undefined,
-            captureT: undefined,
-          }
-          points.current.push(p)
-        }
-        // Initialize as outlier at screen edge
-        p.state = 'outlier'
-        p.alpha = 1.0
-        const fromLeft = Math.random() < 0.5
-        p.x = fromLeft ? -EDGE_SPAWN_PAD : W + EDGE_SPAWN_PAD
-        p.y = Math.max(TOP_EXCLUDE + 10, SPAWN_MARGIN + Math.random() * Math.max(0, H - SPAWN_MARGIN * 2 - TOP_EXCLUDE))
-        const baseV = 75 + Math.random() * 25
-        p.vx = fromLeft ? baseV : -baseV
-            p.vy = rand(-15, 15)
-      }
+      for (let s = 0; s < toSpawn; s++) spawnOutlier(1)
       spawnCooldown.current = rand(baseInterval * 0.6, baseInterval * 1.4)
     }
+
+    // Higher-tier spawns on fixed 5s cadence per tier with chance rolls
+    const iqUp = persisted.current?.iqUpgrades || { silverUnlocked: false, goldUnlocked: false, rareUnlocked: false, epicUnlocked: false, silverChanceLvl: 0, goldChanceLvl: 0, rareChanceLvl: 0, epicChanceLvl: 0, computeMult: 0, autoCollect: 0 }
+    const rollTierSpawn = (tier: 2 | 3 | 4 | 5, baseChance: number) => {
+      const lvl = tier === 2 ? (iqUp.silverChanceLvl || 0) : tier === 3 ? (iqUp.goldChanceLvl || 0) : tier === 4 ? (iqUp.rareChanceLvl || 0) : (iqUp.epicChanceLvl || 0)
+      const eff = Math.min(1, baseChance * (1 + 0.25 * lvl))
+      if (Math.random() < eff) spawnOutlier(tier)
+    }
+
+    const fixedInterval = 5
+    silverTimer.current -= dt
+    goldTimer.current -= dt
+    rareTimer.current -= dt
+    epicTimer.current -= dt
+    if (silverTimer.current <= 0 && iqUp.silverUnlocked) { rollTierSpawn(2, 0.50); silverTimer.current += fixedInterval }
+    if (goldTimer.current <= 0 && iqUp.goldUnlocked) { rollTierSpawn(3, 0.10); goldTimer.current += fixedInterval }
+    if (rareTimer.current <= 0 && iqUp.rareUnlocked) { rollTierSpawn(4, 0.02); rareTimer.current += fixedInterval }
+    if (epicTimer.current <= 0 && iqUp.epicUnlocked) { rollTierSpawn(5, 0.005); epicTimer.current += fixedInterval }
 
     // Core passive income per second (account for stacked cores)
     let tokenDelta = 0
@@ -1611,13 +1662,39 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     return best
   }
 
+  // Spawn a flying outlier of a specific tier (1=Bronze..5=Epic)
+  function spawnOutlier(tier: 1 | 2 | 3 | 4 | 5) {
+    const W = worldW.current || 0
+    const H = worldH.current || 0
+    if (!W || !H) return
+    let p: any = null
+    const idx = findAmbientIndex()
+    if (idx !== -1) {
+      p = points.current[idx]
+    } else {
+      const newId = points.current.length
+      p = { id: newId, x: 0, y: 0, vx: 0, vy: 0, alpha: 1, state: 'outlier' as const, age: 0, rotationOffset: Math.random() * Math.PI * 2, clusterId: undefined, targetCluster: undefined, captureT: undefined }
+      points.current.push(p)
+    }
+    // Initialize as outlier at edges
+    p.state = 'outlier'
+    p.alpha = 1.0
+    const fromLeft = Math.random() < 0.5
+    p.x = fromLeft ? -EDGE_SPAWN_PAD : W + EDGE_SPAWN_PAD
+    p.y = Math.max(TOP_EXCLUDE + 10, SPAWN_MARGIN + Math.random() * Math.max(0, H - SPAWN_MARGIN * 2 - TOP_EXCLUDE))
+    const baseV = 75 + Math.random() * 25
+    p.vx = fromLeft ? baseV : -baseV
+    p.vy = rand(-15, 15)
+    p.tier = tier
+  }
+
   function convertOutlier(idx: number, skipAnimation: boolean = false) {
     const p = points.current[idx]
     const cIdx = nearestCluster(p.x, p.y)
     // mark as capturing to animate into core before being counted
     p.state = 'capturing'
     p.targetCluster = cIdx
-    p.captureT = skipAnimation ? 0.1 : 0.4 // Shorter capture time for dragged points
+    p.captureT = skipAnimation ? 0.35 : 0.6 // Ensure visible travel time before convert
     p.vx = 0
     p.vy = 0
 
@@ -1643,6 +1720,37 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     p.dragOffsetY = undefined
     p.wobbleT = undefined
     p.wobbleStrength = undefined
+  }
+
+  // Spawn a new captured shard from an outlier point (duplicate effect)
+  function spawnCapturedShardFrom(src: Point, offsetScale = 1.0) {
+    const cIdx = nearestCluster(src.x, src.y)
+    const newId = points.current.length
+    const angle = Math.random() * Math.PI * 2
+    const radius = 24 * offsetScale // wider initial fan out
+    const dx = Math.cos(angle) * radius
+    const dy = Math.sin(angle) * radius
+    const shard: Point = {
+      id: newId,
+      x: src.x + dx,
+      y: src.y + dy,
+      vx: 0,
+      vy: 0,
+      state: 'capturing',
+      clusterId: undefined,
+      age: 0,
+      alpha: 1,
+      tier: src.tier,
+      targetCluster: cIdx,
+      captureT: 0.9 + Math.random() * 0.4,
+      rotationOffset: Math.random() * Math.PI * 2,
+    }
+    shard.initialVx = Math.cos(angle) * (70 + Math.random() * 60)
+    shard.initialVy = Math.sin(angle) * (70 + Math.random() * 60)
+    shard.velocityCooldownT = 0.35 + Math.random() * 0.35
+    shard.wobbleT = Math.random() * Math.PI * 2
+    shard.wobbleStrength = 1.0 + Math.random() * 1.0
+    points.current.push(shard)
   }
 
   function consumeMembers(cIdx: number, count: number) {
@@ -1980,12 +2088,15 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         rec.x = renderX
         rec.y = renderY
         rec.radius = renderRadius
-        rec.alpha = Math.max(0.9, p.alpha)
-        rec.color = p.state === 'capturing' ? 10 : 4 // Custom data glow color for capturing points
+        rec.alpha = Math.max(0.95, p.alpha)
+        // Map color index by tier for clearer differentiation
+        const tierColorIndex: Record<number, number> = { 1: 11, 2: 12, 3: 13, 4: 6, 5: 7 }
+        rec.color = tierColorIndex[p.tier || 1]
         rec.shape = 'icon'
         rec.variant = p.id & 3
+        ;(rec as any).tier = p.tier || 1
         // Enhanced glow for capturing points with vibrant neon green
-        rec.glow = p.state === 'capturing' ? 2.0 : (1 + (p.isDragging ? 0.5 : 0.2))
+        rec.glow = p.state === 'capturing' ? 2.4 : (1.3 + (p.isDragging ? 0.7 : 0.35))
         renderStats.outliers.rendered++
       }
     }
@@ -2853,28 +2964,96 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
             continue
           }
           // Page icon with sharp corners + diagonal fold line + scribbles
-          const dq = uiStateRef.current.upgrades.dataQuality ?? 1
-          const GLOW_COLORS = { 1: "#f59e0b", 2: "#d1d5db", 3: "#facc15" }
-          const GLOW = GLOW_COLORS[Math.min(3, Math.max(1, dq)) as 1|2|3]
+          // Tiered glows (outliers/capturing carry tier); neon mode overrides to 5
+          let tier = (r as any).tier || 1
+          const cos = (snapshot as any).currentCosmetics || null
+          const neonOn = !!(cos?.specialEffects?.rgbNeon)
+          if (neonOn) tier = 5
+          const TIER_COLORS: Record<number, string> = {
+            1: "#cd7f32", // bronze
+            2: "#c0c0c0", // silver
+            3: "#ffd700", // gold
+            4: "#3b82f6", // rare royal blue
+            5: "#7c3aed", // epic vibrant purple
+          }
+          const GLOW = TIER_COLORS[tier] || TIER_COLORS[1]
           const w = r.radius * 5.8
           const h = r.radius * 7.6
           const x = r.x - w / 2
           const y = r.y - h / 2
 
-          // Page-shaped glow for clickable outliers: soft fill + 3 shrinking strokes (reduced in low quality)
+          // Page-shaped glow for clickable outliers: vibrant fill + (pulsing for rare/epic only)
           if (r.glow && r.glow > 0) {
             const prevAlpha = ctx.globalAlpha
-            // Soft base fill halo
-            ctx.globalAlpha = 0.06 * r.glow
+            // Base fill halo (no pulse for bronze/silver/gold)
+            const tPulse = (tier >= 4) ? (0.5 + 0.5 * Math.sin(performance.now() * 0.006 + (r.x + r.y) * 0.01)) : 0
+            const baseGlow = (tier === 1 ? 0.10 : tier === 2 ? 0.12 : tier === 3 ? 0.14 : 0.16)
+            ctx.globalAlpha = baseGlow * r.glow * (tier >= 4 ? (0.9 + 0.3 * tPulse) : 1.0)
             ctx.fillStyle = GLOW
             ctx.fillRect(x - 1, y - 1, w + 2, h + 2)
             // Outer strokes (reduced passes in low quality mode)
             ctx.strokeStyle = GLOW
             const maxPasses = lowQualityMode.current ? 1 : 3
             for (let pass = maxPasses; pass >= 1; pass--) {
-              ctx.globalAlpha = 0.08 * r.glow * (pass / maxPasses) + 0.02 * r.glow
+              const strokeBase = (tier === 1 ? 0.12 : tier === 2 ? 0.14 : tier === 3 ? 0.16 : 0.18)
+              ctx.globalAlpha = strokeBase * r.glow * (pass / maxPasses) * (tier >= 4 ? (0.85 + 0.3 * tPulse) : 1.0)
               ctx.lineWidth = 1 + pass
               ctx.strokeRect(x - pass, y - pass, w + pass * 2, h + pass * 2)
+            }
+            // Shape-fitted outer halo pulse only for rare/epic
+            if (tier >= 4) {
+              const haloGrow = 2 + 4 * (0.5 + 0.5 * Math.sin(performance.now() * 0.004))
+              ctx.globalAlpha = 0.20 * r.glow
+              ctx.strokeStyle = GLOW
+              ctx.lineWidth = Math.max(1, Math.floor(haloGrow))
+              ctx.strokeRect(x - haloGrow, y - haloGrow, w + haloGrow * 2, h + haloGrow * 2)
+            }
+            // Ethereal laser sheen and border gradient for rare/legendary
+            if (tier >= 4) {
+              const t = performance.now() * 0.001
+              const pulse = 0.5 + 0.5 * Math.sin(t * (tier === 5 ? 4.0 : 2.8))
+              ctx.globalAlpha = 0.10 * r.glow + 0.08 * pulse
+              // Diagonal shimmering line across page
+              ctx.strokeStyle = GLOW
+              ctx.lineWidth = Math.max(1, Math.floor((w + h) * 0.02))
+              ctx.beginPath()
+              ctx.moveTo(x - 4, y + h * 0.2)
+              ctx.lineTo(x + w + 4, y + h * 0.8)
+              ctx.stroke()
+              // Soft radial burst at center
+              const cx2 = x + w / 2, cy2 = y + h / 2
+              const grad = ctx.createRadialGradient(cx2, cy2, 0, cx2, cy2, Math.max(w, h) * 0.7)
+              grad.addColorStop(0, GLOW)
+              grad.addColorStop(1, GLOW + '00')
+              ctx.globalAlpha = 0.12 + 0.10 * pulse
+              ctx.fillStyle = grad
+              ctx.beginPath(); ctx.arc(cx2, cy2, Math.max(w, h) * 0.6, 0, Math.PI * 2); ctx.fill()
+
+              // Animated border gradient pass (shifts around the rectangle)
+              const sweep = (t * (tier === 5 ? 1.8 : 1.2)) % 1
+              const gx1 = x + w * sweep
+              const gy1 = y
+              const gx2 = x + w * ((sweep + 0.5) % 1)
+              const gy2 = y + h
+              const lg = ctx.createLinearGradient(gx1, gy1, gx2, gy2)
+              const mid = (tier === 5 ? '#c084fc' : '#60a5fa')
+              lg.addColorStop(0, GLOW + '00')
+              lg.addColorStop(0.45, mid)
+              lg.addColorStop(1, GLOW + '00')
+              ctx.globalAlpha = 0.5 * (0.4 + 0.6 * pulse)
+              ctx.strokeStyle = lg as any
+              ctx.lineWidth = 1.5
+              ctx.strokeRect(x - 1, y - 1, w + 2, h + 2)
+
+              if (tier === 5) {
+                // Extra epic glow: outer radial aura with quick pulse
+                const aura = ctx.createRadialGradient(cx2, cy2, 0, cx2, cy2, Math.max(w, h))
+                aura.addColorStop(0, '#7c3aed33')
+                aura.addColorStop(1, '#7c3aed00')
+                ctx.globalAlpha = 0.22 + 0.18 * (0.5 + 0.5 * Math.sin(t * 5.2))
+                ctx.fillStyle = aura
+                ctx.beginPath(); ctx.arc(cx2, cy2, Math.max(w, h), 0, Math.PI * 2); ctx.fill()
+              }
             }
             ctx.globalAlpha = prevAlpha
           }
@@ -2884,12 +3063,28 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           ctx.strokeStyle = "rgba(0,0,0,0.22)"
           ctx.lineWidth = 1
           ctx.strokeRect(x + 0.6, y + 0.6, w, h)
-          ctx.globalAlpha = Math.min(1, r.alpha + 0.1)
-          ctx.fillStyle = "rgba(255,255,255,0.05)"
+          // Shiny fill and specular highlight per tier
+          ctx.globalAlpha = Math.min(1, r.alpha + 0.22)
+          const fillMetal = tier === 1 ? 'rgba(255,198,125,0.16)'
+            : tier === 2 ? 'rgba(255,255,255,0.18)'
+            : tier === 3 ? 'rgba(255,230,120,0.18)'
+            : tier === 4 ? 'rgba(59,130,246,0.14)'
+            : 'rgba(124,58,237,0.16)'
+          ctx.fillStyle = fillMetal
           ctx.fillRect(x, y, w, h)
           ctx.globalAlpha = Math.min(1, r.alpha + 0.05)
           ctx.strokeStyle = color
           ctx.strokeRect(x, y, w, h)
+
+          // Specular strip (top-left to center) for shiny effect
+          ctx.globalAlpha = 0.12 + (tier >= 4 ? 0.06 : 0)
+          ctx.fillStyle = 'rgba(255,255,255,0.75)'
+          ctx.beginPath()
+          ctx.moveTo(x + w * 0.05, y + h * 0.15)
+          ctx.lineTo(x + w * 0.45, y + h * 0.05)
+          ctx.lineTo(x + w * 0.30, y + h * 0.28)
+          ctx.closePath()
+          ctx.fill()
 
           // Diagonal fold indicator (top-right); stroke only, no fill
           const fold = Math.max(2, Math.floor(w * 0.22))
@@ -3050,7 +3245,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           persisted.current.tokens = 0
           persisted.current.iq = 0
           persisted.current.upgrades = { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0, dataQuality: 0 }
-          persisted.current.iqUpgrades = { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false }
+          persisted.current.iqUpgrades = { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false, silverUnlocked: false, goldUnlocked: false, rareUnlocked: false, epicUnlocked: false, silverChanceLvl: 0, goldChanceLvl: 0, rareChanceLvl: 0, epicChanceLvl: 0 }
           persisted.current.totalEverCollected = 0
           persisted.current.dragAndDropEnabled = true
         }
@@ -3059,7 +3254,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           tokens: 0,
           iq: 0,
           upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0, dataQuality: 0 },
-          iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
+          iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false, silverUnlocked: false, goldUnlocked: false, rareUnlocked: false, epicUnlocked: false, silverChanceLvl: 0, goldChanceLvl: 0, rareChanceLvl: 0, epicChanceLvl: 0 },
           cosmetics: resetCosmetics,
           dragAndDropEnabled: true,
         }))
@@ -3076,7 +3271,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         console.warn('Invalid IQ upgrade key:', key)
         return
       }
-      const validKeys = ['computeMult', 'autoCollect', 'confetti', 'palette']
+      const validKeys = ['computeMult', 'autoCollect', 'silverUnlock', 'goldUnlock', 'rareUnlock', 'epicUnlock', 'silverChanceUp', 'goldChanceUp', 'rareChanceUp', 'epicChanceUp', 'confetti', 'palette']
       if (!validKeys.includes(key)) {
         console.warn('Invalid IQ upgrade key:', key, 'Valid keys:', validKeys)
         return
@@ -3095,6 +3290,50 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         if (persisted.current.iq < cost) return
         persisted.current.iq -= cost
         persisted.current.iqUpgrades.autoCollect = lvl + 1
+      } else if (key === 'silverUnlock') {
+        if (persisted.current.iqUpgrades.silverUnlocked) return
+        if (persisted.current.iq < 1) return
+        persisted.current.iq -= 1
+        persisted.current.iqUpgrades.silverUnlocked = true
+      } else if (key === 'goldUnlock') {
+        if (persisted.current.iqUpgrades.goldUnlocked) return
+        if (persisted.current.iq < 1) return
+        persisted.current.iq -= 1
+        persisted.current.iqUpgrades.goldUnlocked = true
+      } else if (key === 'rareUnlock') {
+        if (persisted.current.iqUpgrades.rareUnlocked) return
+        if (persisted.current.iq < 1) return
+        persisted.current.iq -= 1
+        persisted.current.iqUpgrades.rareUnlocked = true
+      } else if (key === 'epicUnlock') {
+        if (persisted.current.iqUpgrades.epicUnlocked) return
+        if (persisted.current.iq < 1) return
+        persisted.current.iq -= 1
+        persisted.current.iqUpgrades.epicUnlocked = true
+      } else if (key === 'silverChanceUp') {
+        lvl = persisted.current.iqUpgrades.silverChanceLvl || 0
+        cost = 1
+        if (persisted.current.iq < cost || !persisted.current.iqUpgrades.silverUnlocked) return
+        persisted.current.iq -= cost
+        persisted.current.iqUpgrades.silverChanceLvl = lvl + 1
+      } else if (key === 'goldChanceUp') {
+        lvl = persisted.current.iqUpgrades.goldChanceLvl || 0
+        cost = 1
+        if (persisted.current.iq < cost || !persisted.current.iqUpgrades.goldUnlocked) return
+        persisted.current.iq -= cost
+        persisted.current.iqUpgrades.goldChanceLvl = lvl + 1
+      } else if (key === 'rareChanceUp') {
+        lvl = persisted.current.iqUpgrades.rareChanceLvl || 0
+        cost = 1
+        if (persisted.current.iq < cost || !persisted.current.iqUpgrades.rareUnlocked) return
+        persisted.current.iq -= cost
+        persisted.current.iqUpgrades.rareChanceLvl = lvl + 1
+      } else if (key === 'epicChanceUp') {
+        lvl = persisted.current.iqUpgrades.epicChanceLvl || 0
+        cost = 1
+        if (persisted.current.iq < cost || !persisted.current.iqUpgrades.epicUnlocked) return
+        persisted.current.iq -= cost
+        persisted.current.iqUpgrades.epicChanceLvl = lvl + 1
       } else if (key === 'confetti') {
         if (persisted.current.iqUpgrades.confettiUnlocked) return
         if (persisted.current.iq < 1) return
@@ -3184,22 +3423,17 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       }
       const idx = nearestOutlierWithin(x, y, CLICK_RADIUS)
       if (idx !== -1) {
+        const base = points.current[idx]
+        const t = base?.tier || 1
+        const splitMap: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 5, 5: 8 }
+        const pieces = splitMap[t] || 1
+        // Convert original and spawn extra shards for visual split
         convertOutlier(idx)
+        for (let k = 1; k < pieces; k++) spawnCapturedShardFrom(base, 1 + k * 0.2)
         const upgrades = persisted.current?.upgrades || { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }
-        let gain = CLICK_BASE + (upgrades.clickYield || 0)
+        let gain = (CLICK_BASE + (upgrades.clickYield || 0)) * pieces
         // Data Quality: bring extra outliers if available (bronze=1, silver=2, gold=3)
-        const dq = Math.min(3, Math.max(1, upgrades.dataQuality || 1))
-        if (dq > 1) {
-          let need = dq - 1
-          for (let i = 0; i < points.current.length && need > 0; i++) {
-            const p = points.current[i]
-            if (p.state === 'outlier') {
-              convertOutlier(i)
-              gain += 1
-              need--
-            }
-          }
-        }
+        // Remove old dataQuality burst; now handled by tier splitting
         // Mini-Batch: +10% per level, collect ALL outliers if >1 present
         const mbLevel = upgrades.batchCollect || 0
         const chance = clamp(0.1 * mbLevel, 0, 1)
@@ -3376,10 +3610,18 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           point.targetCluster = nearestCoreIdx
 
           // VELOCITY COOLDOWN: Allow momentum to play out before capture begins
-          point.velocityCooldownT = 1.5 // 1.5 seconds of free momentum before orbital pull starts
-          point.captureT = 0.4 // Normal capture time, but won't start until velocity cooldown ends
+          point.velocityCooldownT = 0.6 // shorter cooldown so it still shows split path
+          point.captureT = 0.8 // ensure visible travel before convert
 
           console.log('🎯 Drag ended - point dropped at (', point.x.toFixed(1), point.y.toFixed(1), ') targeting core', nearestCoreIdx, '- VELOCITY COOLDOWN:', point.velocityCooldownT, 's')
+
+          // Spawn additional shards based on tier so drag yields correct visual count and value
+          try {
+            const t = point.tier || 1
+            const splitMap: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 5, 5: 8 }
+            const pieces = splitMap[t] || 1
+            for (let k = 1; k < pieces; k++) spawnCapturedShardFrom(point, 1 + k * 0.2)
+          } catch {}
 
           // Clear drag state for this point
           point.isDragging = false

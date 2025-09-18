@@ -319,9 +319,10 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 20 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
-          className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-40 w-96 max-w-[90vw]"
+          className="fixed inset-x-0 bottom-4 z-40 mx-auto w-[92vw] sm:w-96 max-w-[22rem]"
+          style={{ paddingBottom: (typeof window !== 'undefined' && (window as any).CSS && (window as any).CSS.supports && (window as any).CSS.supports('padding-bottom: env(safe-area-inset-bottom)') ? 'env(safe-area-inset-bottom)' : undefined) as any }}
         >
-          <div className="bg-zinc-900/95 backdrop-blur-md border border-zinc-700/70 rounded-lg shadow-xl">
+          <div className="bg-zinc-900/95 backdrop-blur-md border border-zinc-700/70 rounded-lg shadow-xl overflow-hidden">
             {/* Header with tabs */}
             <div className="flex items-center justify-between p-3 border-b border-zinc-700/50">
               <div className="flex gap-1">
@@ -599,7 +600,7 @@ export default function CosmeticsPanel({ visible, onToggle, settings, onSettings
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           onClick={onToggle}
-          className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-30 px-4 py-2 bg-zinc-900/80 backdrop-blur border border-zinc-700/70 rounded-lg text-[11px] text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 transition-all"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 px-4 py-2 bg-zinc-900/80 backdrop-blur border border-zinc-700/70 rounded-lg text-[11px] text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 transition-all"
         >
           <span className="flex items-center gap-2">
             🎨 Cosmetics

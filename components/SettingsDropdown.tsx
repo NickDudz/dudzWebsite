@@ -83,10 +83,10 @@ export default function SettingsDropdown({
         {isOpen && (
           <motion.div
             initial={{ opacity: 0, y: -10, scale: 0.95 }}
-            animate={{ opacity: 1, x: 165, y: 0, scale: 1 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute right-0 top-full mt-2 w-64 sm:w-72 rounded-lg border border-zinc-700/70 bg-zinc-900/95 backdrop-blur-md shadow-xl z-50"
+            className="absolute left-0 top-full mt-2 w-64 sm:w-72 rounded-lg border border-zinc-700/70 bg-zinc-900/95 backdrop-blur-md shadow-xl z-50"
           >
             <div className="p-3 space-y-3">
               <div className="text-xs font-semibold text-zinc-300 border-b border-zinc-700/50 pb-2">
