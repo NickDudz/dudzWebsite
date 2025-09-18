@@ -11,6 +11,8 @@ export type SettingsDropdownProps = {
   onPanelsToggle: () => void
   galaxyOn: boolean
   onGalaxyToggle: () => void
+  dragAndDropEnabled?: boolean
+  onDragAndDropToggle?: () => void
   targetFps?: number
   onTargetFpsChange?: (fps: number) => void
   qualityMode?: 'low' | 'high' | 'extreme'
@@ -29,6 +31,8 @@ export default function SettingsDropdown({
   onPanelsToggle,
   galaxyOn,
   onGalaxyToggle,
+  dragAndDropEnabled = true,
+  onDragAndDropToggle,
   targetFps = 30,
   onTargetFpsChange,
   qualityMode = 'high',
@@ -186,6 +190,32 @@ export default function SettingsDropdown({
                       }`}
                     >
                       {showFpsCounter ? 'On' : 'Off'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Game Settings Section */}
+              <div className="border-t border-zinc-700/50 pt-3">
+                <div className="text-xs font-semibold text-zinc-300 mb-2">
+                  Game Settings
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-zinc-300">Drag & Drop</span>
+                      <div className="text-[10px] text-zinc-500">Click and drag data pages</div>
+                    </div>
+                    <button
+                      onClick={onDragAndDropToggle}
+                      className={`px-2 py-1 text-[10px] rounded transition-all ${
+                        dragAndDropEnabled
+                          ? 'bg-purple-500/20 border border-purple-500/50 text-purple-200'
+                          : 'bg-zinc-700/30 border border-zinc-600/50 text-zinc-400'
+                      }`}
+                    >
+                      {dragAndDropEnabled ? 'On' : 'Off'}
                     </button>
                   </div>
                 </div>

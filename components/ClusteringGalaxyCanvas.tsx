@@ -133,7 +133,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       // Check if we've moved enough to consider this a drag
       // Only allow drag start within reasonable distance from initial click
       const MAX_DRAG_START_DISTANCE = 100 // Increased to give more room for dragging
-      if (moveDistance > 15 && moveDistance < MAX_DRAG_START_DISTANCE && !isDragging) {
+      if (moveDistance > 15 && moveDistance < MAX_DRAG_START_DISTANCE && !isDragging && api.getDragAndDropEnabled?.()) {
         console.log('🎯 Attempting drag at distance:', moveDistance.toFixed(1), '(max:', MAX_DRAG_START_DISTANCE, ')')
         dragAttempted = true // Prevent further attempts
         // Try to start dragging from current mouse position (not start position)

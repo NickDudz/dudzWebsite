@@ -88,6 +88,7 @@ export type GalaxyState = {
   iq: number
   upgrades: Upgrades
   iqUpgrades: { computeMult: number; autoCollect: number; confettiUnlocked: boolean; paletteUnlocked: boolean }
+  dragAndDropEnabled: boolean
 }
 
 export type GalaxyAPI = {
@@ -113,6 +114,8 @@ export type GalaxyAPI = {
   startDrag: (x: number, y: number) => boolean
   updateDrag: (x: number, y: number) => void
   endDrag: (velocityX: number, velocityY: number) => void
+  setDragAndDropEnabled: (enabled: boolean) => void
+  getDragAndDropEnabled: () => boolean
   debug: {
     addTokens: (amount: number) => void
     addIQ: (amount: number) => void
@@ -392,6 +395,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     iq: 0,
     upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 },
     iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
+    dragAndDropEnabled: true, // Default enabled
   }))
   const [targetFpsState, setTargetFpsState] = useState(30)
   const [performanceModeState, setPerformanceModeState] = useState(false)
@@ -786,7 +790,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const tecRaw = localStorage.getItem('galaxy.totalEverCollected')
       const totalEverCollected = tecRaw ? (parseInt(tecRaw, 10) || 0) : 0
       persisted.current = { tokens, iq, upgrades, iqUpgrades, lastSeen, totalEverCollected }
-      setUiState({ tokens, iq, upgrades, iqUpgrades })
+      setUiState({ tokens, iq, upgrades, iqUpgrades, dragAndDropEnabled: true })
       // Restore cores
       const coreDataRaw = localStorage.getItem('galaxy.coreData')
       if (coreDataRaw) {
@@ -836,11 +840,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         lastSeen: Date.now(),
         totalEverCollected: 0
       }
-      setUiState({ 
-        tokens: 0, 
-        iq: 0, 
-        upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 }, 
-        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false } 
+      setUiState({
+        tokens: 0,
+        iq: 0,
+        upgrades: { spawnRate: 0, spawnQty: 0, clickYield: 0, batchCollect: 0 },
+        iqUpgrades: { computeMult: 0, autoCollect: 0, confettiUnlocked: false, paletteUnlocked: false },
+        dragAndDropEnabled: true
       })
     }
 
@@ -2959,6 +2964,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     getRenderStats() { return renderStatsRef.current },
     setExtremeMode(v: boolean) { setExtremeModeState(!!v) },
     getExtremeMode() { return extremeMode.current },
+    setDragAndDropEnabled(enabled: boolean) {
+      setUiState(s => ({ ...s, dragAndDropEnabled: enabled }))
+    },
+    getDragAndDropEnabled() { return uiState.dragAndDropEnabled },
     setPerformanceMode(v: boolean) {
       const next = !!v
       lowQualityMode.current = next

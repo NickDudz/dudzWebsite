@@ -166,38 +166,50 @@ export default function Page() {
                 </svg>
                 {panelsOn && <span>GitHub</span>}
               </a>
-              <SettingsDropdown
-                bgEffectsOn={bgEffectsOn}
-                onBgEffectsToggle={() => setBgEffectsOn(v => !v)}
-                panelsOn={panelsOn}
-                onPanelsToggle={() => setPanelsOn(v => !v)}
-                galaxyOn={galaxyOn}
-                onGalaxyToggle={() => setGalaxyOn(v => !v)}
-                targetFps={galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30}
-                onTargetFpsChange={(fps) => galaxy.api?.setTargetFps?.(fps)}
-                qualityMode={
-                  galaxy.api?.getExtremeMode?.() ? 'extreme' : (galaxy.api?.getPerformanceMode?.() ? 'low' : 'high')
-                }
-                onQualityModeChange={(mode) => {
-                  if (mode === 'low') {
-                    galaxy.api?.setExtremeMode?.(false)
-                    galaxy.api?.setPerformanceMode?.(true)
-                  } else if (mode === 'high') {
-                    galaxy.api?.setExtremeMode?.(false)
-                    galaxy.api?.setPerformanceMode?.(false)
-                  } else if (mode === 'extreme') {
-                    galaxy.api?.setPerformanceMode?.(false)
-                    galaxy.api?.setExtremeMode?.(true)
-                  }
-                }}
-                showFpsCounter={showFpsCounter}
-                onFpsCounterToggle={() => setShowFpsCounter(v => !v)}
-                onExportSave={() => null} // Not implemented yet
-                onImportSave={(saveData) => false} // Not implemented yet
-                onClearSave={() => galaxy.api?.clearSaveData?.() || false}
-              />
             </div>
           </div>
+        </div>
+
+        {/* Settings Button - Below email/github buttons */}
+        <div className="flex justify-start mb-4 pointer-events-none">
+          <div className="pointer-events-auto">
+            <SettingsDropdown
+              bgEffectsOn={bgEffectsOn}
+              onBgEffectsToggle={() => setBgEffectsOn(v => !v)}
+              panelsOn={panelsOn}
+              onPanelsToggle={() => setPanelsOn(v => !v)}
+              galaxyOn={galaxyOn}
+              onGalaxyToggle={() => setGalaxyOn(v => !v)}
+              dragAndDropEnabled={galaxy.api?.getDragAndDropEnabled?.() ?? true}
+              onDragAndDropToggle={() => {
+                const current = galaxy.api?.getDragAndDropEnabled?.() ?? true
+                galaxy.api?.setDragAndDropEnabled?.(!current)
+              }}
+              targetFps={galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30}
+              onTargetFpsChange={(fps) => galaxy.api?.setTargetFps?.(fps)}
+              qualityMode={
+                galaxy.api?.getExtremeMode?.() ? 'extreme' : (galaxy.api?.getPerformanceMode?.() ? 'low' : 'high')
+              }
+              onQualityModeChange={(mode) => {
+                if (mode === 'low') {
+                  galaxy.api?.setExtremeMode?.(false)
+                  galaxy.api?.setPerformanceMode?.(true)
+                } else if (mode === 'high') {
+                  galaxy.api?.setExtremeMode?.(false)
+                  galaxy.api?.setPerformanceMode?.(false)
+                } else if (mode === 'extreme') {
+                  galaxy.api?.setPerformanceMode?.(false)
+                  galaxy.api?.setExtremeMode?.(true)
+                }
+              }}
+              showFpsCounter={showFpsCounter}
+              onFpsCounterToggle={() => setShowFpsCounter(v => !v)}
+              onExportSave={() => null} // Not implemented yet
+              onImportSave={(saveData) => false} // Not implemented yet
+              onClearSave={() => galaxy.api?.clearSaveData?.() || false}
+            />
+          </div>
+        </div>
 
           {/* Expand Game Button - Center */}
           {panelsOn && (
