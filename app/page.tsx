@@ -135,6 +135,7 @@ export default function Page() {
         show={showFpsCounter}
         getCurrentFps={galaxy.api?.getCurrentFps}
         getTargetFps={galaxy.api?.getTargetFps}
+        getRenderStats={galaxy.api?.getRenderStats}
         className="fixed top-16 left-4 z-40 pointer-events-none"
       />
 

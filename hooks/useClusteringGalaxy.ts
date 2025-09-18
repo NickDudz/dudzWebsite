@@ -86,6 +86,7 @@ export type GalaxyAPI = {
   setPerformanceMode: (lowQuality: boolean) => void
   getPerformanceMode: () => boolean
   getCurrentFps: () => number
+  getRenderStats: () => { outliers: { rendered: number; total: number; limit: number }; ambient: { rendered: number; total: number; limit: number }; clustered: { rendered: number; total: number; limit: number }; cores: { rendered: number; total: number; limit: number }; unlockables: { rendered: number; total: number; limit: number }; buffer: { used: number; total: number; available: number } }
   setExtremeMode: (v: boolean) => void
   getExtremeMode: () => boolean
   debug: {
@@ -134,6 +135,16 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
   // Virtual world scaling
   const WORLD_VU = 1000 // canonical virtual units across the shortest screen axis
   const zoomRef = useRef<number>(1)
+  
+  // Render statistics tracking
+  const renderStatsRef = useRef<{ outliers: { rendered: number; total: number; limit: number }; ambient: { rendered: number; total: number; limit: number }; clustered: { rendered: number; total: number; limit: number }; cores: { rendered: number; total: number; limit: number }; unlockables: { rendered: number; total: number; limit: number }; buffer: { used: number; total: number; available: number } }>({
+    outliers: { rendered: 0, total: 0, limit: 0 },
+    ambient: { rendered: 0, total: 0, limit: 0 },
+    clustered: { rendered: 0, total: 0, limit: 0 },
+    cores: { rendered: 0, total: 0, limit: 0 },
+    unlockables: { rendered: 0, total: 0, limit: 0 },
+    buffer: { used: 0, total: 0, available: 0 }
+  })
   function updateZoom() {
     const w = worldW.current || (typeof window !== 'undefined' ? window.innerWidth : 1200)
     const h = worldH.current || (typeof window !== 'undefined' ? window.innerHeight : 800)
@@ -1189,19 +1200,35 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const qty = Math.min(5, 1 + (upgrades.spawnQty || 0))
       const toSpawn = Math.min(qty, Math.max(0, 10 - currentOutliers))
       for (let s = 0; s < toSpawn; s++) {
-        const ambientIdx = findAmbientIndex()
-        if (ambientIdx !== -1) {
-          const p = points.current[ambientIdx]
-          p.state = "outlier"
-          p.alpha = 1.0
-          const fromLeft = Math.random() < 0.5
-          p.x = fromLeft ? -EDGE_SPAWN_PAD : W + EDGE_SPAWN_PAD
-          p.y = Math.max(TOP_EXCLUDE + 10, SPAWN_MARGIN + Math.random() * Math.max(0, H - SPAWN_MARGIN * 2 - TOP_EXCLUDE))
-          // velocities in px/sec for smooth cross-screen motion
-          const baseV = 75 + Math.random() * 25 // 75..100 px/s (reduced by 50%)
-          p.vx = fromLeft ? baseV : -baseV
-          p.vy = rand(-15, 15) // Reduced vertical variance for more predictable motion
+        let p: any = null
+        const idx = findAmbientIndex()
+        if (idx !== -1) {
+          p = points.current[idx]
+        } else {
+          // Fallback: create a new point to ensure outliers always spawn
+          const newId = points.current.length
+          p = {
+            id: newId,
+            x: 0, y: 0, vx: 0, vy: 0,
+            alpha: 1,
+            state: 'outlier' as const,
+            age: 0,
+            rotationOffset: Math.random() * Math.PI * 2,
+            clusterId: undefined,
+            targetCluster: undefined,
+            captureT: undefined,
+          }
+          points.current.push(p)
         }
+        // Initialize as outlier at screen edge
+        p.state = 'outlier'
+        p.alpha = 1.0
+        const fromLeft = Math.random() < 0.5
+        p.x = fromLeft ? -EDGE_SPAWN_PAD : W + EDGE_SPAWN_PAD
+        p.y = Math.max(TOP_EXCLUDE + 10, SPAWN_MARGIN + Math.random() * Math.max(0, H - SPAWN_MARGIN * 2 - TOP_EXCLUDE))
+        const baseV = 75 + Math.random() * 25
+        p.vx = fromLeft ? baseV : -baseV
+        p.vy = rand(-15, 15)
       }
       spawnCooldown.current = rand(baseInterval * 0.6, baseInterval * 1.4)
     }
@@ -1540,8 +1567,18 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const visibleCoreCount = clusters.current.filter(c => c.isVisible !== false).length
     const coreReserveCap = extremeMode.current ? GAME_CONFIG.CORE_RESERVE_CAP_EXTREME : (lowQualityMode.current ? GAME_CONFIG.CORE_RESERVE_CAP_LOW : GAME_CONFIG.CORE_RESERVE_CAP_HIGH)
     const reservedForCores = Math.min(visibleCoreCount * 2, coreReserveCap) // 2 draws per core (halo + dot)
-    const reservedForOutliers = 30 // Always reserve space for flying data
+    const reservedForOutliers = 120 // Generous reserve so outliers/capturing never cull
     const availableForData = Math.max(50, drawBuffer.length - reservedForCores - reservedForOutliers - 10)
+
+    // Initialize rendering stats
+    const renderStats = {
+      outliers: { rendered: 0, total: 0, limit: reservedForOutliers },
+      ambient: { rendered: 0, total: 0, limit: 0 },
+      clustered: { rendered: 0, total: 0, limit: 0 },
+      cores: { rendered: 0, total: visibleCoreCount, limit: Math.floor(reservedForCores / 2) }, // cores, not draw records
+      unlockables: { rendered: 0, total: unlockables.current.length, limit: 10 },
+      buffer: { used: 0, total: drawBuffer.length, available: availableForData }
+    }
 
     const cullMargin = 50 // Extra margin for viewport culling
 
@@ -1549,6 +1586,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     for (let i = 0; i < points.current.length; i++) {
       const p = points.current[i]
       if (p.state === "outlier" || p.state === 'capturing') {
+        renderStats.outliers.total++
         if (n >= drawBuffer.length - reservedForCores - 5) break
 
         const rec = drawBuffer[n++]
@@ -1560,6 +1598,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         rec.shape = 'icon'
         rec.variant = p.id & 3
         rec.glow = p.state === 'capturing' ? 0.5 : 1
+        renderStats.outliers.rendered++
       }
     }
 
@@ -1586,9 +1625,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const targetDensity = isMobileRef.current ? 0.00003 : 0.00008 // tuned: ~24 vs ~64 per 800x1000
     const densityCap = Math.floor(area * targetDensity)
     const maxAmbient = Math.max(0, Math.min(densityCap, Math.floor(availableForData * 0.6 * ambientFactor)))
+    renderStats.ambient.limit = maxAmbient
+    
     for (let i = 0; i < points.current.length && ambientCount < maxAmbient; i++) {
       const p = points.current[i]
       if (p.state === "ambient") {
+        renderStats.ambient.total++
         // Viewport culling in low quality mode
         if (lowQualityMode.current &&
             (p.x < -cullMargin || p.x > W + cullMargin ||
@@ -1607,6 +1649,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         rec.variant = -1 // Mark as ambient
         rec.glow = 0
         ambientCount++
+        renderStats.ambient.rendered++
       }
     }
 
@@ -1616,10 +1659,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     const minOrbit = extremeMode.current ? 1 : 2
     const maxOrbitingPerCore = Math.max(minOrbit, Math.floor(baseOrbitMax - visibleCoreCount / decay)) // Reduce as cores increase, higher in high-quality
     const clusteredByCore = new Map<number, number>()
+    renderStats.clustered.limit = visibleCoreCount * maxOrbitingPerCore
 
     for (let i = 0; i < points.current.length; i++) {
       const p = points.current[i]
       if (p.state === "clustered" && p.clusterId != null) {
+        renderStats.clustered.total++
         const coreId = p.clusterId
         const currentCount = clusteredByCore.get(coreId) || 0
 
@@ -1641,6 +1686,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           rec.variant = p.id & 3
           rec.glow = 0
           clusteredByCore.set(coreId, currentCount + 1)
+          renderStats.clustered.rendered++
         }
       }
     }
@@ -1669,6 +1715,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         ;(rec as any).breakT = u.breakT
         ;(rec as any).breakTotal = u.breakTotal
         rec.glow = 1.0
+        renderStats.unlockables.rendered++
       }
     }
     for (let i = 0; i < clusters.current.length; i++) {
@@ -1705,6 +1752,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
       // Count base pair against core budget
       coreBaseRecordsDrawn += 2
+      renderStats.cores.rendered += 1 // Count cores, not draw records
 
       // Visualize stacked cores with multiple small offset dots arranged in up to 3 rings
       const extraStacks = Math.max(0, (c.stackCount || 1) - 1)
@@ -1761,6 +1809,12 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     snapshot.current.points.length = n
     // Assign references without reallocating
     for (let i = 0; i < n; i++) snapshot.current.points[i] = drawBuffer[i]
+
+    // Update final buffer usage stats
+    renderStats.buffer.used = n
+    
+    // Store stats in ref for API access
+    renderStatsRef.current = renderStats
 
     // Debug logging for buffer usage (remove in production)
     if (n > drawBuffer.length * 0.9) {
@@ -2369,6 +2423,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     },
     getTargetFps() { return targetFps.current },
     getCurrentFps() { return currentFps.current },
+    getRenderStats() { return renderStatsRef.current },
     setExtremeMode(v: boolean) { setExtremeModeState(!!v) },
     getExtremeMode() { return extremeMode.current },
     setPerformanceMode(v: boolean) {
