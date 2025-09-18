@@ -1233,9 +1233,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           // Smooth speed based on distance - faster when far, slower when close
           const speedFactor = Math.min(1, dist / 50) // Max speed when far, slow down when close
           
-          // Enhanced capture speed: 50% faster base, scaling to 100% faster at 1000+ cores
+          // Enhanced capture speed: 25% faster base, scaling to 75% faster at 1000+ cores
           const coreCount = clusters.current.length
-          const coreSpeedMultiplier = 1.5 + (Math.min(coreCount, 1000) / 1000) * 0.5 // 1.5x to 2x based on cores
+          const coreSpeedMultiplier = 1.25 + (Math.min(coreCount, 1000) / 1000) * 0.5 // 1.25x to 1.75x based on cores
           const spd = (200 + (dist * 2)) * coreSpeedMultiplier // Base speed + distance-based acceleration + core scaling
         const nx = dx / (dist || 1)
         const ny = dy / (dist || 1)
@@ -1307,6 +1307,37 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
             // Apply velocity with gradual decay
             p.x += p.initialVx * dt
             p.y += p.initialVy * dt
+            
+            // Add orbital pull toward target core during velocity cooldown for faster absorption
+            if (p.targetCluster !== null && p.targetCluster !== undefined) {
+              const c = clusters.current[p.targetCluster]
+              if (c) {
+                const dx = c.x - p.x
+                const dy = c.y - p.y
+                const dist = Math.hypot(dx, dy)
+                
+                if (dist > 5) { // Only apply if not too close
+                  // Calculate orbital pull with core count scaling
+                  const coreCount = clusters.current.length
+                  const coreSpeedMultiplier = 1.25 + (Math.min(coreCount, 1000) / 1000) * 0.5
+                  
+                  // Apply gentle pull toward core (weaker than full capture)
+                  const pullStrength = 50 * coreSpeedMultiplier * dt // Gentle but noticeable pull
+                  const nx = dx / (dist || 1)
+                  const ny = dy / (dist || 1)
+                  
+                  p.x += nx * pullStrength
+                  p.y += ny * pullStrength
+                  
+                  // Add slight orbital motion for more dynamic movement
+                  const tangentX = -ny * 20 * coreSpeedMultiplier * dt
+                  const tangentY = nx * 20 * coreSpeedMultiplier * dt
+                  
+                  p.x += tangentX
+                  p.y += tangentY
+                }
+              }
+            }
             
             // Decay velocity over time (slower decay for floatier feel)
             p.initialVx *= (1 - dt * 0.3) // Slower decay than before
@@ -3296,7 +3327,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           point.targetCluster = nearestCoreIdx
 
           // VELOCITY COOLDOWN: Allow momentum to play out before capture begins
-          point.velocityCooldownT = 2.0 // 2 seconds of free momentum before orbital pull starts
+          point.velocityCooldownT = 1.5 // 1.5 seconds of free momentum before orbital pull starts
           point.captureT = 0.4 // Normal capture time, but won't start until velocity cooldown ends
 
           console.log('🎯 Drag ended - point dropped at (', point.x.toFixed(1), point.y.toFixed(1), ') targeting core', nearestCoreIdx, '- VELOCITY COOLDOWN:', point.velocityCooldownT, 's')
