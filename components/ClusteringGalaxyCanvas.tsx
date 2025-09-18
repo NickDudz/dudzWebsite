@@ -69,6 +69,11 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
     let dragStartCoords = { x: 0, y: 0 }
     let dragAttempted = false // Prevent multiple drag attempts
 
+    // Mouse velocity tracking for physics
+    let mouseHistory: { x: number; y: number; time: number }[] = []
+    const MAX_VELOCITY_HISTORY = 5 // Track last 5 positions
+    const VELOCITY_SAMPLE_TIME = 100 // Sample every 100ms
+
     const getCanvasCoords = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect()
       return {
@@ -98,6 +103,16 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       if (!enabled) return
 
       const coords = getCanvasCoords(e.clientX, e.clientY)
+      const now = performance.now()
+
+      // Track mouse velocity for physics
+      if (mouseHistory.length === 0 ||
+          now - mouseHistory[mouseHistory.length - 1].time > VELOCITY_SAMPLE_TIME) {
+        mouseHistory.push({ x: coords.x, y: coords.y, time: now })
+        if (mouseHistory.length > MAX_VELOCITY_HISTORY) {
+          mouseHistory.shift() // Keep only recent history
+        }
+      }
 
       // CRITICAL: Check if we're already dragging FIRST
       if (isDragging) {
@@ -145,12 +160,25 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       console.log('👆 Pointer up - isDragging:', isDragging, 'hasMoved:', hasMoved, 'dragAttempted:', dragAttempted)
 
       if (isDragging) {
-        // End drag - this should happen when user releases after successful drag
-        console.log('🏁 Ending drag (user released after dragging)')
-        api.endDrag()
+        // Calculate mouse velocity for physics effects
+        let velocityX = 0, velocityY = 0
+        if (mouseHistory.length >= 2) {
+          const recent = mouseHistory[mouseHistory.length - 1]
+          const older = mouseHistory[mouseHistory.length - 2]
+          const timeDiff = recent.time - older.time
+          if (timeDiff > 0) {
+            velocityX = (recent.x - older.x) / timeDiff * 1000 // pixels per second
+            velocityY = (recent.y - older.y) / timeDiff * 1000
+          }
+        }
+
+        // End drag with velocity data for physics
+        console.log('🏁 Ending drag (user released after dragging) - velocity:', velocityX.toFixed(1), velocityY.toFixed(1))
+        api.endDrag(velocityX, velocityY)
         canvas.releasePointerCapture(e.pointerId)
         isDragging = false
-        console.log('✅ Drag ended - point should move to nearest core')
+        mouseHistory = [] // Clear mouse history after drag
+        console.log('✅ Drag ended - point should move to nearest core with physics')
       } else if (!hasMoved && !dragAttempted) {
         // Quick click - no movement, no drag attempted = regular click
         console.log('👆 Quick click detected - triggering click')
@@ -180,6 +208,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       isDragging = false
       hasMoved = false
       dragAttempted = false
+      mouseHistory = [] // Clear mouse history
     }
 
     const handleContextMenu = (e: MouseEvent) => {
@@ -196,6 +225,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       isDragging = false
       hasMoved = false
       dragAttempted = false
+      mouseHistory = [] // Clear mouse history
     }
 
     const handleWindowBlur = () => {
@@ -211,6 +241,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       isDragging = false
       hasMoved = false
       dragAttempted = false
+      mouseHistory = [] // Clear mouse history
     }
 
     // Add pointer events for better cross-device support

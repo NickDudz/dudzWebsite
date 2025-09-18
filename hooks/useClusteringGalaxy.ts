@@ -50,6 +50,14 @@ export type Point = {
   isDragging?: boolean // Whether point is being dragged
   dragOffsetX?: number // Mouse offset from point center during drag
   dragOffsetY?: number // Mouse offset from point center during drag
+  // Visual physics effects
+  rotation?: number // Current rotation angle for visual effects
+  rotationSpeed?: number // Rotation speed
+  wobbleT?: number // Wobble animation timer (0-1)
+  wobbleStrength?: number // How much wobble effect
+  // Velocity-based physics for spiral capture
+  initialVx?: number // Initial velocity from mouse movement
+  initialVy?: number // Initial velocity from mouse movement
 }
 
 export type Cluster = {
@@ -103,7 +111,7 @@ export type GalaxyAPI = {
   // Drag and drop methods
   startDrag: (x: number, y: number) => boolean
   updateDrag: (x: number, y: number) => void
-  endDrag: () => void
+  endDrag: (velocityX?: number, velocityY?: number) => void
   debug: {
     addTokens: (amount: number) => void
     addIQ: (amount: number) => void
@@ -1205,18 +1213,57 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           p.y = dragStateRef.current.worldY - (p.dragOffsetY || 0)
           console.log('🎯 DRAG UPDATE: Mouse world (', dragStateRef.current.worldX.toFixed(1), dragStateRef.current.worldY.toFixed(1), ') point moved from (', oldX.toFixed(1), oldY.toFixed(1), ') to (', p.x.toFixed(1), p.y.toFixed(1), ')')
         } else {
-          // Normal capture animation toward core
-        const c = clusters.current[p.targetCluster]
-        const dx = c.x - p.x
-        const dy = c.y - p.y
-        const dist = Math.hypot(dx, dy)
+          // Enhanced capture animation with orbit pull effect
+          const c = clusters.current[p.targetCluster]
+          const dx = c.x - p.x
+          const dy = c.y - p.y
+          const dist = Math.hypot(dx, dy)
+
           // Smooth speed based on distance - faster when far, slower when close
           const speedFactor = Math.min(1, dist / 50) // Max speed when far, slow down when close
           const spd = 200 + (dist * 2) // Base speed + distance-based acceleration
-        const nx = dx / (dist || 1)
-        const ny = dy / (dist || 1)
-          p.x += nx * spd * speedFactor * dt
-          p.y += ny * spd * speedFactor * dt
+          const nx = dx / (dist || 1)
+          const ny = dy / (dist || 1)
+
+          // Add orbit pull effect - points follow the core's orbital direction
+          // This creates arcing paths that match the center's clockwise rotation
+          let orbitVx = 0, orbitVy = 0
+          if (dist > 20) { // Only apply when not too close to core
+            // Calculate tangential velocity for orbital motion around the core
+            const tangentX = -ny // Perpendicular to direction to core
+            const tangentY = nx
+            const orbitSpeed = Math.min(50, dist * 0.5) // Orbital speed based on distance
+            orbitVx = tangentX * orbitSpeed * speedFactor
+            orbitVy = tangentY * orbitSpeed * speedFactor
+          }
+
+          // Apply velocity-based physics if available
+          if (p.initialVx !== undefined && p.initialVy !== undefined) {
+            // Combine initial momentum with orbital pull
+            const momentumFactor = Math.max(0, 1 - (dist / 100)) // Momentum fades as we approach core
+            orbitVx += p.initialVx * momentumFactor
+            orbitVy += p.initialVy * momentumFactor
+
+            // Gradually reduce initial velocity
+            p.initialVx *= (1 - dt * 2) // Fade over ~0.5 seconds
+            p.initialVy *= (1 - dt * 2)
+            if (Math.abs(p.initialVx) < 1) p.initialVx = undefined
+            if (Math.abs(p.initialVy) < 1) p.initialVy = undefined
+          }
+
+          p.x += (nx * spd + orbitVx) * speedFactor * dt
+          p.y += (ny * spd + orbitVy) * speedFactor * dt
+        }
+
+        // Update rotation for visual effects
+        if (p.rotation !== undefined && p.rotationSpeed !== undefined) {
+          p.rotation += p.rotationSpeed * dt
+        }
+
+        // Update wobble effect during drag
+        if (p.isDragging && p.wobbleT !== undefined) {
+          p.wobbleT += dt * 4 // Fast wobble frequency
+          if (p.wobbleT > 1) p.wobbleT -= 1 // Keep it cycling 0-1
         }
 
         // Only count down capture timer if not being dragged
@@ -1464,15 +1511,25 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     // Trigger click animation if not skipping (for drag drops)
     if (!skipAnimation) {
       p.clickAnimT = 1.0 // Start click animation
-      p.clickRot = (Math.random() - 0.5) * 0.8 // Random rotation direction
-      p.clickOffsetX = (Math.random() - 0.5) * 6 // Random position shift
-      p.clickOffsetY = (Math.random() - 0.5) * 6
+      p.clickRot = (Math.random() - 0.5) * 1.2 // Enhanced diagonal rotation
+      p.clickOffsetX = (Math.random() - 0.5) * 8 // Enhanced position shift
+      p.clickOffsetY = (Math.random() - 0.5) * 8
+
+      // Initialize rotation for visual feedback
+      if (p.rotation === undefined) {
+        p.rotation = Math.random() * Math.PI * 2 // Random starting rotation
+      }
+      if (p.rotationSpeed === undefined) {
+        p.rotationSpeed = (Math.random() - 0.5) * 4 // Random rotation speed
+      }
     }
 
     // Clear drag state if it exists
     p.isDragging = false
     p.dragOffsetX = undefined
     p.dragOffsetY = undefined
+    p.wobbleT = undefined
+    p.wobbleStrength = undefined
   }
 
   function consumeMembers(cIdx: number, count: number) {
@@ -1774,26 +1831,39 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         const rec = drawBuffer[n++]
         rec.x = p.x
         rec.y = p.y
-        // Apply click animation effects
+        // Apply visual effects: click animation, rotation, wobble
         let renderX = p.x
         let renderY = p.y
-        let renderRot = p.rotationOffset || 0
+        let renderRot = (p.rotation || 0) + (p.rotationOffset || 0)
         let renderRadius = p.state === 'capturing' ? 2.4 : 2.6
 
+        // Apply click animation effects
         if (p.clickAnimT && p.clickAnimT > 0) {
-          // Apply click animation - rotation and position shift
+          // Update click animation timer
+          p.clickAnimT = Math.max(0, p.clickAnimT - dt * 3) // 0.33 second animation
+
+          // Apply click animation - enhanced diagonal rotation and position shift
           const animProgress = 1 - p.clickAnimT // 0 to 1
           const easeOut = 1 - Math.pow(1 - animProgress, 3) // Cubic ease-out
 
-          renderRot += (p.clickRot || 0) * easeOut
+          renderRot += (p.clickRot || 0) * easeOut * 1.5 // Enhanced rotation
           renderX += (p.clickOffsetX || 0) * easeOut
           renderY += (p.clickOffsetY || 0) * easeOut
-          renderRadius *= (1 + easeOut * 0.2) // Slight size increase during click
+          renderRadius *= (1 + easeOut * 0.3) // More size increase during click
         }
 
         // Apply drag visual effects
         if (p.isDragging) {
-          renderRadius *= 1.1 // Slightly larger when dragging
+          renderRadius *= 1.15 // Larger when dragging
+
+          // Apply wobble effect to show user control
+          if (p.wobbleT !== undefined && p.wobbleStrength !== undefined) {
+            const wobbleX = Math.sin(p.wobbleT * Math.PI * 2) * p.wobbleStrength
+            const wobbleY = Math.cos(p.wobbleT * Math.PI * 2) * p.wobbleStrength * 0.5
+            renderX += wobbleX
+            renderY += wobbleY
+          }
+
           console.log('🎯 RENDERING dragged point at:', renderX.toFixed(1), renderY.toFixed(1), 'world coords, radius:', renderRadius.toFixed(1))
         }
 
@@ -3113,6 +3183,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           p.dragOffsetX = dragOffsetX
           p.dragOffsetY = dragOffsetY
 
+          // Initialize wobble effect for drag feedback
+          p.wobbleT = 0 // Start wobble animation
+          p.wobbleStrength = 2 + Math.random() * 2 // Random wobble strength 2-4 pixels
+
           return true
         }
       }
@@ -3130,7 +3204,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       console.log('🖱️ Mouse at screen coords:', x.toFixed(1), y.toFixed(1), '-> world:', worldCoords.x.toFixed(1), worldCoords.y.toFixed(1))
     },
 
-    endDrag() {
+    endDrag(velocityX, velocityY) {
       if (!dragStateRef.current?.isActive) return
 
       const draggedPointIdx = dragStateRef.current.draggedPoint
@@ -3140,6 +3214,19 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           // Set final position using stored world coordinates (no double conversion needed)
           point.x = dragStateRef.current.worldX - (point.dragOffsetX || 0)
           point.y = dragStateRef.current.worldY - (point.dragOffsetY || 0)
+
+          // Apply velocity-based physics if mouse velocity was provided
+          if (velocityX !== undefined && velocityY !== undefined) {
+            // Convert canvas velocity to world velocity
+            const worldVelX = velocityX * zoomRef.current
+            const worldVelY = velocityY * zoomRef.current
+
+            // Apply initial momentum (scaled down for reasonable effect)
+            point.initialVx = worldVelX * 0.3
+            point.initialVy = worldVelY * 0.3
+
+            console.log('🚀 Applied velocity physics:', worldVelX.toFixed(1), worldVelY.toFixed(1))
+          }
 
           // Find the nearest core to the dropped position
           const nearestCoreIdx = nearestCluster(point.x, point.y)
@@ -3154,6 +3241,8 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
           point.isDragging = false
           point.dragOffsetX = undefined
           point.dragOffsetY = undefined
+          point.wobbleT = undefined
+          point.wobbleStrength = undefined
         }
       }
 
