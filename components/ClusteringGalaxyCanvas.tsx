@@ -6,7 +6,7 @@ import type { DrawSnapshot } from "../hooks/useClusteringGalaxy"
 export type ClusteringGalaxyCanvasProps = {
   enabled: boolean
   parallaxY: number
-  api: { getDrawSnapshot(): DrawSnapshot; registerCanvas: (c: HTMLCanvasElement | null) => () => void; clickAt: (x: number, y: number) => void }
+  api: { getDrawSnapshot(): DrawSnapshot; registerCanvas: (c: HTMLCanvasElement | null) => () => void; clickAt: (x: number, y: number) => void; startDrag: (x: number, y: number) => boolean; updateDrag: (x: number, y: number) => void; endDrag: () => void }
 }
 
 /**
@@ -59,19 +59,99 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
     }
   }, [enabled])
 
-  // Map clicks to hook clickAt
+  // Handle mouse/touch events for clicks and drag-and-drop
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !api?.clickAt) return
-    const onClick = (e: MouseEvent) => {
-      if (!enabled) return
+    if (!canvas || !api?.clickAt || !api?.startDrag || !api?.updateDrag || !api?.endDrag) return
+
+    let dragStartTime = 0
+    let isDragging = false
+
+    const getCanvasCoords = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-      api.clickAt(x, y)
+      return {
+        x: clientX - rect.left,
+        y: clientY - rect.top
+      }
     }
-    canvas.addEventListener("click", onClick)
-    return () => canvas.removeEventListener("click", onClick)
+
+    const handlePointerDown = (e: PointerEvent) => {
+      if (!enabled) return
+
+      const coords = getCanvasCoords(e.clientX, e.clientY)
+      dragStartTime = Date.now()
+
+      // Try to start dragging first (longer press for drag)
+      // If no draggable point found, it will fall back to click
+      setTimeout(() => {
+        if (!isDragging && Date.now() - dragStartTime > 150) { // 150ms delay to distinguish click from drag
+          const dragStarted = api.startDrag(coords.x, coords.y)
+          if (dragStarted) {
+            isDragging = true
+            canvas.setPointerCapture(e.pointerId)
+          }
+        }
+      }, 150)
+    }
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!enabled) return
+
+      const coords = getCanvasCoords(e.clientX, e.clientY)
+
+      if (isDragging) {
+        // Update drag position
+        api.updateDrag(coords.x, coords.y)
+      } else if (Date.now() - dragStartTime > 150) {
+        // Late start drag if we haven't started yet but moved enough
+        const dragStarted = api.startDrag(coords.x, coords.y)
+        if (dragStarted) {
+          isDragging = true
+          canvas.setPointerCapture(e.pointerId)
+        }
+      }
+    }
+
+    const handlePointerUp = (e: PointerEvent) => {
+      if (!enabled) return
+
+      const coords = getCanvasCoords(e.clientX, e.clientY)
+      const dragDuration = Date.now() - dragStartTime
+
+      if (isDragging) {
+        // End drag
+        api.endDrag()
+        canvas.releasePointerCapture(e.pointerId)
+      } else if (dragDuration < 150) {
+        // Quick click
+        api.clickAt(coords.x, coords.y)
+      }
+
+      isDragging = false
+      dragStartTime = 0
+    }
+
+    const handlePointerCancel = (e: PointerEvent) => {
+      if (isDragging) {
+        api.endDrag()
+        canvas.releasePointerCapture(e.pointerId)
+      }
+      isDragging = false
+      dragStartTime = 0
+    }
+
+    // Add pointer events for better cross-device support
+    canvas.addEventListener("pointerdown", handlePointerDown)
+    canvas.addEventListener("pointermove", handlePointerMove)
+    canvas.addEventListener("pointerup", handlePointerUp)
+    canvas.addEventListener("pointercancel", handlePointerCancel)
+
+    return () => {
+      canvas.removeEventListener("pointerdown", handlePointerDown)
+      canvas.removeEventListener("pointermove", handlePointerMove)
+      canvas.removeEventListener("pointerup", handlePointerUp)
+      canvas.removeEventListener("pointercancel", handlePointerCancel)
+    }
   }, [enabled, api])
 
   return (
