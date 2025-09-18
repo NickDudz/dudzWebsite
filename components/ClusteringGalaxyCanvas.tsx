@@ -83,6 +83,7 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       dragStartCoords = coords
       isDragging = false
       hasMoved = false
+      console.log('Pointer down at:', coords.x, coords.y)
     }
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -93,8 +94,10 @@ export default function ClusteringGalaxyCanvas({ enabled, parallaxY, api }: Clus
       // Check if we've moved enough to consider this a drag
       const moveDistance = Math.hypot(coords.x - dragStartCoords.x, coords.y - dragStartCoords.y)
       if (moveDistance > 10 && !isDragging) { // 10px threshold
+        console.log('Movement detected, trying to start drag...')
         // Try to start dragging
         const dragStarted = api.startDrag(dragStartCoords.x, dragStartCoords.y)
+        console.log('Drag start result:', dragStarted)
         if (dragStarted) {
           isDragging = true
           canvas.setPointerCapture(e.pointerId)

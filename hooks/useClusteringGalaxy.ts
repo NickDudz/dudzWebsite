@@ -3068,11 +3068,17 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       const worldX = worldCoords.x
       const worldY = worldCoords.y
 
+      console.log('startDrag called at:', x, y, 'world:', worldX, worldY)
+
       // Find the nearest outlier within click radius
       const idx = nearestOutlierWithin(worldX, worldY, CLICK_RADIUS)
+      console.log('nearestOutlierWithin returned:', idx, 'CLICK_RADIUS:', CLICK_RADIUS)
+
       if (idx !== -1) {
         const p = points.current[idx]
+        console.log('Found point at index', idx, 'state:', p.state, 'position:', p.x, p.y)
         if (p.state === 'outlier') {
+          console.log('Starting drag for point', idx)
           // Start dragging this point
           p.isDragging = true
           p.dragOffsetX = p.x - worldX
