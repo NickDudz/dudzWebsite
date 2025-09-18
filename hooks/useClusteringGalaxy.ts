@@ -2976,7 +2976,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     setExtremeMode(v: boolean) { setExtremeModeState(!!v) },
     getExtremeMode() { return extremeMode.current },
     setDragAndDropEnabled(enabled: boolean) {
+      // Update state and ref immediately so engine checks use the latest value
       setUiState(s => ({ ...s, dragAndDropEnabled: enabled }))
+      try { uiStateRef.current = { ...uiStateRef.current, dragAndDropEnabled: enabled } as GalaxyState } catch {}
       // Persist to localStorage
       try {
         localStorage.setItem("galaxy.dragAndDropEnabled", enabled.toString())
@@ -2984,7 +2986,7 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
         console.warn("Failed to save drag and drop setting:", e)
       }
     },
-    getDragAndDropEnabled() { return uiState.dragAndDropEnabled },
+    getDragAndDropEnabled() { return !!uiStateRef.current?.dragAndDropEnabled },
     setPerformanceMode(v: boolean) {
       const next = !!v
       lowQualityMode.current = next
@@ -3266,6 +3268,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     // Drag and drop functionality
     startDrag(x, y) {
       if (!enabledRef.current) return false
+      // Respect UI setting: drag-and-drop disabled
+      if (!uiStateRef.current.dragAndDropEnabled) {
+        console.log('🚫 Drag disabled via settings')
+        return false
+      }
 
       // Prevent starting a new drag if one is already active
       if (dragStateRef.current?.isActive) {
@@ -3318,6 +3325,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
 
     updateDrag(x, y) {
       if (!enabledRef.current || !dragStateRef.current?.isActive) return
+      if (!uiStateRef.current.dragAndDropEnabled) {
+        // If disabled mid-drag, terminate gracefully
+        dragStateRef.current = null
+        return
+      }
 
       // Convert screen coordinates to world coordinates and store them
       const worldCoords = screenToWorld(x, y)
@@ -3330,6 +3342,10 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
     endDrag(velocityX, velocityY) {
       if (!dragStateRef.current?.isActive) {
         console.log('🚫 endDrag called but no active drag state - ignoring')
+        return
+      }
+      if (!uiStateRef.current.dragAndDropEnabled) {
+        dragStateRef.current = null
         return
       }
 

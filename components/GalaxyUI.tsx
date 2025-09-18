@@ -477,7 +477,7 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
         <div className="flex items-center justify-between">
           <div className="font-semibold text-sm" style={coreGradientStyle} suppressHydrationWarning>Data Continuum Idle</div>
           <div className="inline-flex items-center gap-2">
-            {sidebar && (
+            {sidebar ? (
               <>
                 {/* Close (X) button - exits sidebar and shows dropdown toggle again */}
                 <button
@@ -513,6 +513,32 @@ export default function GalaxyUI({ state, api, onToggle, enabled = true, collaps
                       <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.585l3.71-3.354a.75.75 0 011.04 1.08l-4.24 3.833a.75.75 0 01-1.04 0L5.21 8.29a.75.75 0 01.02-1.08z" />
                     </svg>
                   )}
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Close (X) button for dropdown - simply collapse */}
+                <button
+                  onClick={() => onCollapsedChange && onCollapsedChange(true)}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-zinc-600/70 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60"
+                  aria-label="Close panel"
+                  title="Close"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+                {/* Down arrow in dropdown - open sidebar in compact mode */}
+                <button
+                  onClick={() => { setCompactSidebar(true); onSidebarToggle && onSidebarToggle() }}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-zinc-600/70 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60"
+                  aria-label="Open compact sidebar"
+                  title="Open compact sidebar"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                    <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.585l3.71-3.354a.75.75 0 011.04 1.08l-4.24 3.833a.75.75 0 01-1.04 0L5.21 8.29a.75.75 0 01.02-1.08z" />
+                  </svg>
                 </button>
               </>
             )}

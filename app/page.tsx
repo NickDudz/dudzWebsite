@@ -26,6 +26,7 @@ export default function Page() {
   const [showPanelsHint, setShowPanelsHint] = useState(false)
   const [unlockToast, setUnlockToast] = useState<string | null>(null)
   const [cosmeticsVisible, setCosmeticsVisible] = useState(false)
+  const [dragAndDropEnabled, setDragAndDropEnabled] = useState(true)
   const lagFactor = 0.05 // Smoother interpolation for parallax
 
   useEffect(() => {
@@ -34,11 +35,20 @@ export default function Page() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+
   // Galaxy state hook (single RAF loop internally)
   const galaxy = useClusteringGalaxy({
     enabled: galaxyOn,
     orbitalMode: true, // Enable circular orbit with slight wavy path
   })
+
+  // Sync local DnD enabled state from engine once api is available
+  useEffect(() => {
+    try {
+      const val = galaxy.api?.getDragAndDropEnabled?.()
+      if (typeof val === 'boolean') setDragAndDropEnabled(val)
+    } catch {}
+  }, [galaxy.api])
 
   // Auto-start game (disable tutorial/intro)
   useEffect(() => {
@@ -216,10 +226,11 @@ export default function Page() {
               onPanelsToggle={() => setPanelsOn(v => !v)}
               galaxyOn={galaxyOn}
               onGalaxyToggle={() => setGalaxyOn(v => !v)}
-              dragAndDropEnabled={galaxy.api?.getDragAndDropEnabled?.() ?? true}
+              dragAndDropEnabled={dragAndDropEnabled}
               onDragAndDropToggle={() => {
-                const current = galaxy.api?.getDragAndDropEnabled?.() ?? true
-                galaxy.api?.setDragAndDropEnabled?.(!current)
+                const next = !dragAndDropEnabled
+                try { galaxy.api?.setDragAndDropEnabled?.(next) } catch {}
+                setDragAndDropEnabled(next)
               }}
               targetFps={galaxy.api?.getTargetFps ? galaxy.api.getTargetFps() : 30}
               onTargetFpsChange={fps => galaxy.api?.setTargetFps?.(fps)}
