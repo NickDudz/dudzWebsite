@@ -3064,8 +3064,9 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       if (!enabledRef.current) return false
 
       // Convert screen coordinates to world coordinates
-      const worldX = screenToWorldX(x)
-      const worldY = screenToWorldY(y)
+      const worldCoords = screenToWorld(x, y)
+      const worldX = worldCoords.x
+      const worldY = worldCoords.y
 
       // Find the nearest outlier within click radius
       const idx = nearestOutlierWithin(worldX, worldY, CLICK_RADIUS)
@@ -3096,12 +3097,11 @@ export function useClusteringGalaxy(opts: UseClusteringGalaxyOptions = {}) {
       if (!enabledRef.current || !dragStateRef.current?.isActive) return
 
       // Convert screen coordinates to world coordinates
-      const worldX = screenToWorldX(x)
-      const worldY = screenToWorldY(y)
+      const worldCoords = screenToWorld(x, y)
 
       // Update drag state
-      dragStateRef.current.worldX = worldX
-      dragStateRef.current.worldY = worldY
+      dragStateRef.current.worldX = worldCoords.x
+      dragStateRef.current.worldY = worldCoords.y
     },
 
     endDrag() {
